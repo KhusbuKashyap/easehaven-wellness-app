@@ -8,14 +8,14 @@ import { ArrowRight, Bot, Feather, Heart, Home, MessageSquare, Sun, Moon, User, 
 // --- Firebase Configuration ---
 // The __firebase_config and __app_id variables are provided by the environment.
 const firebaseConfig = {
-  apiKey: "AIzaSyDoxbgjjPOsSlgYNGlDQlBIkS3Aft46Ud0",
-  authDomain: "easehaven-wellness-app.firebaseapp.com",
-  projectId: "easehaven-wellness-app",
-  storageBucket: "easehaven-wellness-app.firebasestorage.app",
-  messagingSenderId: "526675114160",
-  appId: "1:526675114160:web:9b31c080e2d3185a42e375"
+  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
+  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
-const appId = 'easehaven-local';
+const appId = 'easehaven-web-app'; // A simple ID for the deployed app
 
 // --- Initialize Firebase ---
 const app = initializeApp(firebaseConfig);
