@@ -1,389 +1,508 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore, collection, addDoc, query, onSnapshot, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { ArrowRight, Bot, Feather, Heart, Home, MessageSquare, Sun, Moon, User, LogIn, Activity, Award } from 'lucide-react';
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, onSnapshot, updateDoc, serverTimestamp, orderBy, where } from 'firebase/firestore';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { ArrowRight, Bot, Feather, Heart, Home, LogOut, MessageSquare, Sun, Moon, User, Settings, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb } from 'lucide-react';
 
 // --- Firebase Configuration ---
-// The __firebase_config and __app_id variables are provided by the environment.
+// This configuration is for your Firebase project.
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
+  apiKey: "AIzaSyDoxbgjjPOsSlgYNGlDQlBIkS3Aft46Ud0",
+  authDomain: "easehaven-wellness-app.firebaseapp.com",
+  projectId: "easehaven-wellness-app",
+  storageBucket: "easehaven-wellness-app.firebasestorage.app",
+  messagingSenderId: "526675114160",
+  appId: "1:526675114160:web:9b31c080e2d3185a42e375"
 };
-const appId = 'easehaven-web-app'; // A simple ID for the deployed app
+
+const appId = 'easehaven-v2';
+
 
 // --- Initialize Firebase ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// --- Main App Component ---
-export default function App() {
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [currentPage, setCurrentPage] = useState('dashboard');
-    const [theme, setTheme] = useState('light');
-    const [isCheckinModalOpen, setCheckinModalOpen] = useState(false);
-    const [userData, setUserData] = useState(null);
+// --- Authentication Context ---
+const AuthContext = createContext();
+const useAuth = () => useContext(AuthContext);
 
-    // Effect for handling authentication state
+const AuthProvider = ({ children }) => {
+    const [user, setUser] = useState(null);
+    const [userData, setUserData] = useState(null);
+    const [loading, setLoading] = useState(true);
+
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-            if (currentUser) {
-                const userDocRef = doc(db, `artifacts/${appId}/users`, currentUser.uid);
-                const userDocSnap = await getDoc(userDocRef);
-                if (!userDocSnap.exists()) {
-                    await setDoc(userDocRef, {
-                        email: currentUser.email || 'anonymous',
-                        displayName: currentUser.displayName || 'Anonymous User',
-                        createdAt: new Date(),
-                        points: 0,
-                        streak: 0,
-                    });
-                }
-                setUser(currentUser);
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+            if (firebaseUser) {
+                const userDocRef = doc(db, 'users', firebaseUser.uid);
+                const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        setUserData({ id: docSnap.id, ...docSnap.data() });
+                    }
+                    setUser(firebaseUser);
+                    setLoading(false);
+                });
+                return () => unsubscribeDoc();
             } else {
                 setUser(null);
+                setUserData(null);
+                setLoading(false);
             }
-            setLoading(false);
         });
         return () => unsubscribe();
     }, []);
 
-    // Effect for fetching user data
-    useEffect(() => {
-        if (user) {
-            const userDocRef = doc(db, `artifacts/${appId}/users`, user.uid);
-            const unsubscribe = onSnapshot(userDocRef, (doc) => {
-                if (doc.exists()) {
-                    setUserData(doc.data());
-                }
-            });
-            return () => unsubscribe();
-        }
-    }, [user]);
+    const value = { user, userData, loading };
 
-    // Effect for managing theme
+    return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
+};
+
+// --- Main App Component ---
+export default function App() {
+    return (
+        <AuthProvider>
+            <MainApp />
+        </AuthProvider>
+    );
+}
+
+function MainApp() {
+    const { user } = useAuth();
+    const [currentPage, setCurrentPage] = useState('dashboard');
+    const [theme, setTheme] = useState('light');
+
     useEffect(() => {
-        document.documentElement.classList.toggle('dark', theme === 'dark');
+        const root = document.documentElement;
+        if (theme === 'dark') {
+            root.classList.add('dark');
+        } else {
+            root.classList.remove('dark');
+        }
     }, [theme]);
 
-    const handleLogin = async () => {
-        try {
-            const provider = new GoogleAuthProvider();
-            await signInWithPopup(auth, provider);
-        } catch (error) {
-            console.error("Error during Google sign-in:", error);
-        }
-    };
-
-    const handleAnonymousLogin = async () => {
-        try {
-            await signInAnonymously(auth);
-        } catch (error) {
-            console.error("Error during anonymous sign-in:", error);
-        }
-    };
-
-    const toggleTheme = () => {
-        setTheme(prevTheme => prevTheme === 'light' ? 'dark' : 'light');
-    };
-
-    const renderPage = () => {
-        switch (currentPage) {
-            case 'dashboard':
-                return <Dashboard user={user} onOpenCheckin={() => setCheckinModalOpen(true)} userData={userData} />;
-            case 'journal':
-                return <JournalScreen user={user} />;
-            case 'chatbot':
-                return <ChatbotScreen user={user} />;
-            case 'meditate':
-                return <MeditateScreen />;
-            default:
-                return <Dashboard user={user} onOpenCheckin={() => setCheckinModalOpen(true)} userData={userData} />;
-        }
-    };
-    
-    if (loading) {
-        return <div className="flex items-center justify-center h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200">Loading EaseHaven...</div>;
-    }
+    const toggleTheme = () => setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
 
     if (!user) {
-        return <AuthScreen onGoogleLogin={handleLogin} onAnonymousLogin={handleAnonymousLogin} />;
+        return <AuthScreen />;
     }
+    
+    const renderPage = () => {
+        switch (currentPage) {
+            case 'dashboard': return <DashboardScreen onNavigate={setCurrentPage} />;
+            case 'tracker': return <MoodTrackerScreen onLogSuccess={() => setCurrentPage('dashboard')} />;
+            case 'journal': return <JournalScreen />;
+            case 'profile': return <ProfileScreen />;
+            default: return <DashboardScreen onNavigate={setCurrentPage} />;
+        }
+    };
 
     return (
         <div className={`min-h-screen font-sans bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex`}>
             <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} toggleTheme={toggleTheme} theme={theme} />
-            <main className="flex-1 p-4 sm:p-6 lg:p-8">
+            <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
                 {renderPage()}
             </main>
-            {isCheckinModalOpen && <DailyCheckinModal user={user} onClose={() => setCheckinModalOpen(false)} />}
+            <ChatAssistant />
         </div>
     );
 }
 
-// --- Screens & Components ---
+// --- Screens ---
 
-function AuthScreen({ onGoogleLogin, onAnonymousLogin }) {
-    return (
-        <div className="flex flex-col items-center justify-center w-full min-h-screen bg-gradient-to-br from-cyan-50 to-blue-100">
-            <div className="text-center p-8 max-w-md mx-auto">
-                <Heart className="w-16 h-16 text-cyan-500 mx-auto mb-4" />
-                <h1 className="text-4xl font-bold text-slate-800">Welcome to EaseHaven</h1>
-                <p className="mt-2 text-slate-600">Your personal space for mental wellness and peace.</p>
-                <div className="mt-8 space-y-4">
-                    <button onClick={onGoogleLogin} className="w-full flex items-center justify-center gap-2 bg-white text-slate-700 font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-slate-50 transition-all duration-300">
-                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google icon" className="w-6 h-6" />
-                        Sign in with Google
-                    </button>
-                    <button onClick={onAnonymousLogin} className="w-full bg-cyan-500 text-white font-semibold py-3 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all duration-300 transform hover:-translate-y-0.5">
-                        <User className="inline-block w-5 h-5 mr-2" />
-                        Continue Anonymously
-                    </button>
-                </div>
-                <p className="mt-6 text-xs text-slate-500">Your privacy is our priority. All data is securely encrypted.</p>
-            </div>
-        </div>
-    );
-}
+function AuthScreen() {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [name, setName] = useState('');
+    const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
 
-function Sidebar({ currentPage, setCurrentPage, toggleTheme, theme }) {
-    const navItems = [
-        { id: 'dashboard', icon: Home, label: 'Dashboard' },
-        { id: 'chatbot', icon: Bot, label: 'AI Helper' },
-        { id: 'journal', icon: Feather, label: 'Journal' },
-        { id: 'meditate', icon: Activity, label: 'Meditate' },
-    ];
-
-    return (
-        <nav className="w-16 hover:w-56 transition-all duration-300 ease-in-out bg-white dark:bg-slate-800 shadow-lg flex flex-col justify-between">
-            <div>
-                <div className="flex items-center justify-center h-20 border-b dark:border-slate-700">
-                     <Heart className="w-8 h-8 text-cyan-500" />
-                </div>
-                <ul>
-                    {navItems.map(item => (
-                        <li key={item.id} className="relative">
-                            <button onClick={() => setCurrentPage(item.id)} className={`flex items-center w-full h-14 px-4 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700 group ${currentPage === item.id ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-600 dark:text-cyan-300' : ''}`}>
-                                <item.icon className="w-6 h-6" />
-                                <span className="ml-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">{item.label}</span>
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            </div>
-            <div className="p-4 border-t dark:border-slate-700">
-                 <button onClick={toggleTheme} className="flex items-center w-full h-14 px-4 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700 group">
-                    {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
-                    <span className="ml-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300">Toggle Theme</span>
-                </button>
-            </div>
-        </nav>
-    );
-}
-
-function Dashboard({ user, onOpenCheckin, userData }) {
-    const [moodLogs, setMoodLogs] = useState([]);
-
-    useEffect(() => {
-        if (user) {
-            const q = query(collection(db, `artifacts/${appId}/users/${user.uid}/moodLogs`));
-            const unsubscribe = onSnapshot(q, (querySnapshot) => {
-                const logs = [];
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    logs.push({ 
-                        id: doc.id, 
-                        ...data,
-                        timestamp: data.timestamp.toDate() 
-                    });
+    const handleAuth = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        try {
+            if (isLogin) {
+                await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                await setDoc(doc(db, 'users', userCredential.user.uid), {
+                    name,
+                    email,
+                    createdAt: serverTimestamp(),
+                    age: '',
+                    occupation: '',
+                    profile_pic: `https://api.dicebear.com/7.x/initials/svg?seed=${name}`
                 });
-                // Sort logs by timestamp client-side
-                logs.sort((a, b) => a.timestamp - b.timestamp);
-                setMoodLogs(logs.slice(-7)); // Only show last 7 for the chart
-            });
-            return () => unsubscribe();
+                await setDoc(doc(db, 'streaks', userCredential.user.uid), {
+                    current_streak: 0,
+                    longest_streak: 0,
+                    last_logged_date: null
+                });
+            }
+        } catch (err) {
+            setError(err.message.replace('Firebase: ', ''));
+        } finally {
+            setLoading(false);
         }
-    }, [user]);
-
-    const chartData = moodLogs.map(log => ({
-        name: log.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        stress: log.stressLevel,
-        mood: log.mood,
-    }));
-
-    const getGreeting = () => {
-        const hour = new Date().getHours();
-        if (hour < 12) return "Good Morning";
-        if (hour < 18) return "Good Afternoon";
-        return "Good Evening";
     };
 
     return (
-        <div className="animate-fade-in">
-            <h1 className="text-3xl font-bold">{getGreeting()}, {userData?.displayName || 'friend'}.</h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">Ready to check in with yourself?</p>
+        <div className="flex flex-col items-center justify-center w-full min-h-screen bg-gradient-to-br from-cyan-50 to-blue-100 dark:from-slate-800 dark:to-slate-900">
+            <div className="w-full max-w-md p-8 space-y-6 bg-white dark:bg-slate-800 rounded-2xl shadow-lg">
+                <div className="text-center">
+                    <Heart className="w-12 h-12 text-cyan-500 mx-auto mb-2" />
+                    <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Welcome to EaseHaven</h1>
+                    <p className="text-slate-500 dark:text-slate-400">{isLogin ? 'Sign in to continue' : 'Create your account'}</p>
+                </div>
+                <form onSubmit={handleAuth} className="space-y-4">
+                    {!isLogin && (
+                        <input type="text" placeholder="Your Name" value={name} onChange={e => setName(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    )}
+                    <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    <button type="submit" disabled={loading} className="w-full bg-cyan-500 text-white font-semibold py-3 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all duration-300 disabled:bg-cyan-300">
+                        {loading ? 'Processing...' : (isLogin ? 'Login' : 'Sign Up')}
+                    </button>
+                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                </form>
+                <p className="text-center text-sm text-slate-500 dark:text-slate-400">
+                    {isLogin ? "Don't have an account?" : "Already have an account?"}
+                    <button onClick={() => setIsLogin(!isLogin)} className="font-semibold text-cyan-500 hover:underline ml-1">
+                        {isLogin ? 'Sign Up' : 'Login'}
+                    </button>
+                </p>
+            </div>
+        </div>
+    );
+}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
+function DashboardScreen({ onNavigate }) {
+    const { userData } = useAuth();
+    const [moodLogs, setMoodLogs] = useState([]);
+    const [streaks, setStreaks] = useState({ current_streak: 0, longest_streak: 0 });
+    const [thoughtOfTheDay, setThoughtOfTheDay] = useState('');
+    const [thoughtLoading, setThoughtLoading] = useState(true);
+
+    useEffect(() => {
+        const getThoughtOfTheDay = async () => {
+            setThoughtLoading(true);
+            // FIX: Use environment variable for API key.
+            const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+            if (!apiKey) {
+                console.error("Gemini API key not found. Please set REACT_APP_GEMINI_API_KEY in your .env.local file.");
+                setThoughtOfTheDay("Every small step forward is still a step forward. Be proud of your progress.");
+                setThoughtLoading(false);
+                return;
+            }
+
+            const prompt = "Provide a short, uplifting, and motivational 'thought of the day' for a user of a mental wellness app. It should be one or two sentences. Do not include quotation marks or any prefixes like 'Thought of the Day:'.";
+            try {
+                const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`API call failed with status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
+                    setThoughtOfTheDay(result.candidates[0].content.parts[0].text);
+                } else {
+                    throw new Error("Invalid response structure from API");
+                }
+            } catch (error) {
+                console.error("Error fetching thought of the day:", error);
+                setThoughtOfTheDay("Every small step forward is still a step forward. Be proud of your progress.");
+            } finally {
+                setThoughtLoading(false);
+            }
+        };
+        getThoughtOfTheDay();
+    }, []);
+
+    useEffect(() => {
+        if (userData) {
+            const q = query(collection(db, `users/${userData.id}/mood_entries`), orderBy("timestamp", "asc"));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                const logs = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.timestamp) {
+                        logs.push({ id: doc.id, ...data, timestamp: data.timestamp.toDate() });
+                    }
+                });
+                setMoodLogs(logs);
+            });
+            
+            const streakRef = doc(db, 'streaks', userData.id);
+            const unsubStreaks = onSnapshot(streakRef, (doc) => {
+                if (doc.exists()) {
+                    setStreaks(doc.data());
+                }
+            });
+
+            return () => {
+                unsubscribe();
+                unsubStreaks();
+            };
+        }
+    }, [userData]);
+
+    const chartData = moodLogs.slice(-7).map(log => ({
+        date: log.timestamp ? log.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A',
+        stress: log.stress_level,
+    }));
+    
+    const moodDistribution = moodLogs.reduce((acc, log) => {
+        acc[log.mood] = (acc[log.mood] || 0) + 1;
+        return acc;
+    }, {});
+
+    const pieData = Object.entries(moodDistribution).map(([name, value]) => ({ name, value }));
+    const MOOD_COLORS = { 'Happy': '#34D399', 'Calm': '#60A5FA', 'Okay': '#A78BFA', 'Sad': '#F472B6', 'Anxious': '#FBBF24', 'Angry': '#F87171' };
+
+    return (
+        <div className="animate-fade-in space-y-8">
+            <h1 className="text-3xl font-bold">Welcome back, {userData?.name || 'friend'}.</h1>
+            
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md flex items-start gap-4">
+                <Lightbulb className="w-8 h-8 text-yellow-400 flex-shrink-0 mt-1" />
+                <div>
+                    <h2 className="font-bold text-lg text-slate-700 dark:text-slate-200">Thought of the Day ✨</h2>
+                    {thoughtLoading ? (
+                        <p className="text-slate-500 dark:text-slate-400 italic mt-1">Generating a fresh thought for you...</p>
+                    ) : (
+                        <p className="text-slate-600 dark:text-slate-300 italic mt-1">"{thoughtOfTheDay}"</p>
+                    )}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="md:col-span-1 bg-gradient-to-br from-cyan-400 to-blue-500 p-6 rounded-xl text-white flex flex-col justify-between shadow-lg">
                     <div>
-                        <h2 className="text-xl font-bold">Daily Check-in</h2>
-                        <p className="mt-2 opacity-90">How are you feeling today? A moment of reflection can make a world of difference.</p>
+                        <h2 className="text-xl font-bold">How are you feeling?</h2>
+                        <p className="mt-2 opacity-90">Log your mood to track your progress and get personalized insights.</p>
                     </div>
-                    <button onClick={onOpenCheckin} className="mt-4 bg-white text-cyan-500 font-bold py-2 px-4 rounded-lg w-full text-center hover:bg-cyan-50 transition-all">
-                        Check In Now
+                    <button onClick={() => onNavigate('tracker')} className="mt-4 bg-white text-cyan-500 font-bold py-2 px-4 rounded-lg w-full text-center hover:bg-cyan-50 transition-all">
+                        Log Today's Mood
                     </button>
                 </div>
-                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md flex items-center justify-between">
+                <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md flex items-center justify-between">
                     <div>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Wellness Points</p>
-                        <p className="text-3xl font-bold text-cyan-500">{userData?.points || 0}</p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">Current Streak</p>
+                        <p className="text-3xl font-bold text-cyan-500">{streaks.current_streak || 0} days</p>
                     </div>
                     <Award className="w-10 h-10 text-yellow-400" />
                 </div>
                 <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md flex items-center justify-between">
                     <div>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Current Streak</p>
-                        <p className="text-3xl font-bold text-cyan-500">{userData?.streak || 0} days</p>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">Longest Streak</p>
+                        <p className="text-3xl font-bold text-cyan-500">{streaks.longest_streak || 0} days</p>
                     </div>
-                    <Activity className="w-10 h-10 text-green-500" />
+                    <Sparkles className="w-10 h-10 text-pink-400" />
                 </div>
             </div>
-
-            <div className="mt-8 bg-white dark:bg-slate-800 p-4 sm:p-6 rounded-xl shadow-md">
-                <h2 className="text-xl font-bold mb-4">Your 7-Day Stress Trend</h2>
-                {chartData.length > 0 ? (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                <div className="lg:col-span-3 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                    <h2 className="text-xl font-bold mb-4">7-Day Stress Trend</h2>
                     <ResponsiveContainer width="100%" height={300}>
                         <BarChart data={chartData}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(128, 128, 128, 0.2)" />
-                            <XAxis dataKey="name" tick={{ fill: 'currentColor' }} />
+                            <XAxis dataKey="date" tick={{ fill: 'currentColor', fontSize: 12 }} />
                             <YAxis domain={[0, 10]} tick={{ fill: 'currentColor' }} />
-                            <Tooltip
-                                contentStyle={{
-                                    backgroundColor: 'rgba(30, 41, 59, 0.8)',
-                                    borderColor: 'rgba(128, 128, 128, 0.5)',
-                                    color: '#fff',
-                                    borderRadius: '0.5rem'
-                                }}
-                            />
-                            <Legend />
-                            <Bar dataKey="stress" fill="#06b6d4" name="Stress Level (0-10)" />
+                            <Tooltip contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderColor: 'rgba(128, 128, 128, 0.5)', borderRadius: '0.5rem' }} />
+                            <Bar dataKey="stress" fill="#06b6d4" name="Stress Level" radius={[4, 4, 0, 0]} />
                         </BarChart>
                     </ResponsiveContainer>
-                ) : (
-                    <div className="h-72 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400">
-                        <p>No data yet.</p>
-                        <p>Complete your first daily check-in to see your trends.</p>
-                    </div>
-                )}
+                </div>
+                <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                    <h2 className="text-xl font-bold mb-4">Mood Distribution</h2>
+                    <ResponsiveContainer width="100%" height={300}>
+                        <PieChart>
+                            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
+                                {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={MOOD_COLORS[entry.name]} />)}
+                            </Pie>
+                            <Tooltip />
+                            <Legend />
+                        </PieChart>
+                    </ResponsiveContainer>
+                </div>
             </div>
         </div>
     );
 }
 
-function DailyCheckinModal({ user, onClose }) {
-    const [stressLevel, setStressLevel] = useState(5);
+function MoodTrackerScreen({ onLogSuccess }) {
+    const { user } = useAuth();
     const [mood, setMood] = useState('');
-    const [triggers, setTriggers] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [stressLevel, setStressLevel] = useState(5);
+    const [note, setNote] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [suggestion, setSuggestion] = useState(null);
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!mood) {
-            alert("Please select a mood.");
+    const moodOptions = [
+        { name: 'Happy', icon: Laugh },
+        { name: 'Calm', icon: Smile },
+        { name: 'Okay', icon: Meh },
+        { name: 'Sad', icon: Frown },
+        { name: 'Anxious', icon: Frown },
+        { name: 'Angry', icon: Angry },
+    ];
+
+    const getAISuggestion = async (mood, stress, userNote) => {
+        // FIX: Use environment variable for API key.
+        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+        if (!apiKey) {
+            console.error("Gemini API key not found.");
+            setSuggestion({ title: "A Moment for You", content: "Take a brief pause. Step away from your screen, stretch, or listen to a favorite song. Sometimes a small break is all you need." });
             return;
         }
-        setIsSubmitting(true);
+
+        const prompt = `A user in a mental wellness app feels "${mood}" with a stress level of ${stress}/10. Their journal note is: "${userNote}". Based on this, provide one simple, safe, non-medical, actionable suggestion for an activity to help them. The suggestion should be encouraging and empathetic. The response must be a JSON object with two keys: "title" (a short, catchy title for the activity) and "content" (a 2-3 sentence description of the activity). Example format: {"title": "Mindful Breathing", "content": "Take a few moments to focus on your breath. Inhale deeply for 4 seconds, hold for 4, and exhale for 6. This can help calm your nervous system."}`;
+        
         try {
-            await addDoc(collection(db, `artifacts/${appId}/users/${user.uid}/moodLogs`), {
-                stressLevel: parseInt(stressLevel),
-                mood,
-                triggers,
-                timestamp: new Date(),
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
-
-            // Update user points and streak
-            const userDocRef = doc(db, `artifacts/${appId}/users`, user.uid);
-            const userDoc = await getDoc(userDocRef);
-            if(userDoc.exists()) {
-                const userData = userDoc.data();
-                // Simple streak logic: check if last check-in was yesterday
-                // For a real app, this logic would be more robust.
-                const newPoints = (userData.points || 0) + 10;
-                const newStreak = (userData.streak || 0) + 1; // Simplified for MVP
-                await updateDoc(userDocRef, {
-                    points: newPoints,
-                    streak: newStreak
-                });
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+            
+            const result = await response.json();
+            if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
+                const text = result.candidates[0].content.parts[0].text;
+                const cleanedText = text.replace(/```json|```/g, '').trim();
+                try {
+                    setSuggestion(JSON.parse(cleanedText));
+                } catch {
+                    throw new Error("Malformed JSON response from AI.");
+                }
+            } else {
+                 throw new Error("Invalid response structure from API");
             }
-
-            onClose();
         } catch (error) {
-            console.error("Error adding mood log: ", error);
-        } finally {
-            setIsSubmitting(false);
+            console.error("Error fetching AI suggestion:", error);
+            setSuggestion({ title: "A Moment for You", content: "Take a brief pause. Step away from your screen, stretch, or listen to a favorite song. Sometimes a small break is all you need." });
         }
     };
-    
-    const moodOptions = ["Happy", "Calm", "Okay", "Sad", "Anxious", "Stressed", "Angry"];
+
+    const handleLogMood = async (e) => {
+        e.preventDefault();
+        if (!mood) return;
+        setLoading(true);
+
+        await addDoc(collection(db, `users/${user.uid}/mood_entries`), {
+            mood,
+            stress_level: parseInt(stressLevel),
+            note,
+            timestamp: serverTimestamp()
+        });
+        
+        const streakRef = doc(db, 'streaks', user.uid);
+        const streakSnap = await getDoc(streakRef);
+        if (streakSnap.exists()) {
+            const streakData = streakSnap.data();
+            const today = new Date().setHours(0, 0, 0, 0);
+            const lastLogged = streakData.last_logged_date?.toDate().setHours(0, 0, 0, 0);
+            
+            let newStreak = streakData.current_streak || 0;
+            if (lastLogged !== today) {
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayTime = yesterday.setHours(0,0,0,0);
+
+                if (lastLogged === yesterdayTime) {
+                    newStreak++;
+                } else {
+                    newStreak = 1;
+                }
+                await updateDoc(streakRef, {
+                    current_streak: newStreak,
+                    longest_streak: Math.max(newStreak, streakData.longest_streak || 0),
+                    last_logged_date: new Date()
+                });
+            }
+        }
+
+        await getAISuggestion(mood, stressLevel, note);
+        setLoading(false);
+    };
+
+    if (suggestion) {
+        return (
+            <div className="flex flex-col items-center justify-center h-full animate-fade-in">
+                <div className="w-full max-w-lg text-center bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-lg">
+                    <Sparkles className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
+                    <h2 className="text-2xl font-bold mb-2">{suggestion.title}</h2>
+                    <p className="text-slate-600 dark:text-slate-300 mb-6">{suggestion.content}</p>
+                    <button onClick={onLogSuccess} className="w-full bg-cyan-500 text-white font-semibold py-3 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all">
+                        Back to Dashboard
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fade-in">
-            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl p-8 w-full max-w-md m-4">
-                <h2 className="text-2xl font-bold mb-4">Daily Check-in</h2>
-                <form onSubmit={handleSubmit}>
-                    <div className="mb-6">
-                        <label className="block text-slate-600 dark:text-slate-300 mb-2">How stressed do you feel right now? (0-10)</label>
-                        <input type="range" min="0" max="10" value={stressLevel} onChange={(e) => setStressLevel(e.target.value)} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer dark:bg-slate-700" />
-                        <div className="text-center font-bold text-cyan-500 text-2xl mt-2">{stressLevel}</div>
-                    </div>
-                    <div className="mb-6">
-                        <label className="block text-slate-600 dark:text-slate-300 mb-2">What's your primary mood?</label>
-                        <div className="flex flex-wrap gap-2">
-                           {moodOptions.map(m => (
-                               <button type="button" key={m} onClick={() => setMood(m)} className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${mood === m ? 'bg-cyan-500 text-white' : 'bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600'}`}>
-                                   {m}
-                               </button>
-                           ))}
+        <div className="flex items-center justify-center h-full">
+            <div className="w-full max-w-2xl bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-lg animate-fade-in">
+                <h1 className="text-3xl font-bold text-center mb-6">How are you feeling now?</h1>
+                <form onSubmit={handleLogMood} className="space-y-6">
+                    <div>
+                        <label className="block text-slate-600 dark:text-slate-300 mb-3 text-center font-medium">Select your mood</label>
+                        <div className="flex justify-center flex-wrap gap-4">
+                            {moodOptions.map(opt => (
+                                <button type="button" key={opt.name} onClick={() => setMood(opt.name)} className={`flex flex-col items-center gap-2 p-4 rounded-lg w-24 h-24 transition-all duration-200 ${mood === opt.name ? 'bg-cyan-500 text-white scale-110 shadow-lg' : 'bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600'}`}>
+                                    <opt.icon className="w-8 h-8" />
+                                    <span className="text-sm font-semibold">{opt.name}</span>
+                                </button>
+                            ))}
                         </div>
                     </div>
-                     <div className="mb-6">
-                        <label htmlFor="triggers" className="block text-slate-600 dark:text-slate-300 mb-2">Any specific triggers? (Optional)</label>
-                        <input id="triggers" type="text" value={triggers} onChange={(e) => setTriggers(e.target.value)} placeholder="e.g., work, family, finances" className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    <div>
+                        <label className="block text-slate-600 dark:text-slate-300 mb-2 text-center font-medium">Stress Level: <span className="font-bold text-cyan-500">{stressLevel}</span></label>
+                        <input type="range" min="0" max="10" value={stressLevel} onChange={e => setStressLevel(e.target.value)} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer dark:bg-slate-700" />
                     </div>
-                    <div className="flex justify-end gap-4">
-                        <button type="button" onClick={onClose} className="py-2 px-4 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700">Cancel</button>
-                        <button type="submit" disabled={isSubmitting} className="py-2 px-4 rounded-lg bg-cyan-500 text-white font-semibold hover:bg-cyan-600 disabled:bg-cyan-300">
-                            {isSubmitting ? 'Saving...' : 'Save Check-in'}
-                        </button>
+                    <div>
+                        <label className="block text-slate-600 dark:text-slate-300 mb-2 font-medium">Add a quick note (optional)</label>
+                        <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="What's on your mind?" className="w-full h-24 p-3 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500"></textarea>
                     </div>
+                    <button type="submit" disabled={loading || !mood} className="w-full bg-cyan-500 text-white font-semibold py-3 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all disabled:bg-cyan-300">
+                        {loading ? 'Saving...' : 'Log Mood & Get Suggestion'}
+                    </button>
                 </form>
             </div>
         </div>
     );
 }
 
-function JournalScreen({ user }) {
+function JournalScreen() {
+    const { user } = useAuth();
     const [entries, setEntries] = useState([]);
     const [newEntry, setNewEntry] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [analyzingEntry, setAnalyzingEntry] = useState(null);
+    const [analysisResult, setAnalysisResult] = useState(null);
+    const [isAnalysisLoading, setIsAnalysisLoading] = useState(false);
 
     useEffect(() => {
         if (user) {
-            const q = query(collection(db, `artifacts/${appId}/users/${user.uid}/journalEntries`));
-            const unsubscribe = onSnapshot(q, (querySnapshot) => {
+            const q = query(collection(db, `users/${user.uid}/journal_entries`), orderBy('timestamp', 'desc'));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
                 const journalEntries = [];
-                querySnapshot.forEach((doc) => {
-                    const data = doc.data();
-                    journalEntries.push({ id: doc.id, ...data, timestamp: data.timestamp.toDate() });
+                snapshot.forEach(doc => {
+                    journalEntries.push({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() });
                 });
-                journalEntries.sort((a, b) => b.timestamp - a.timestamp);
                 setEntries(journalEntries);
             });
             return () => unsubscribe();
@@ -393,16 +512,55 @@ function JournalScreen({ user }) {
     const handleSaveEntry = async () => {
         if (newEntry.trim() === '') return;
         setIsSaving(true);
+        await addDoc(collection(db, `users/${user.uid}/journal_entries`), {
+            content: newEntry,
+            timestamp: serverTimestamp(),
+        });
+        setNewEntry('');
+        setIsSaving(false);
+    };
+
+    const handleAnalyze = async (entry) => {
+        setAnalyzingEntry(entry);
+        setIsAnalysisLoading(true);
+        setAnalysisResult(null);
+        // FIX: Use environment variable for API key.
+        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+        if (!apiKey) {
+            console.error("Gemini API key not found.");
+            setAnalysisResult({ tone: "Could not analyze entry.", themes: [], reflection: "API key is missing. Please configure it in your .env.local file." });
+            setIsAnalysisLoading(false);
+            return;
+        }
+
+        const prompt = `You are a reflective assistant in a wellness app. Analyze the following journal entry from a user. Do not give medical advice or a diagnosis. Your response must be a JSON object with three keys: "tone" (a gentle summary of the emotional tone, e.g., "It sounds like you're feeling..."), "themes" (an array of 2-3 key topics mentioned, e.g., ["Work Stress", "Future Plans"]), and "reflection" (one thoughtful, open-ended question to encourage the user's self-reflection, e.g., "What is one small step you could take towards...?"). Here is the user's entry: "${entry.content}"`;
         try {
-            await addDoc(collection(db, `artifacts/${appId}/users/${user.uid}/journalEntries`), {
-                content: newEntry,
-                timestamp: new Date(),
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
-            setNewEntry('');
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+            const result = await response.json();
+            if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
+                const text = result.candidates[0].content.parts[0].text;
+                const cleanedText = text.replace(/```json|```/g, '').trim();
+                try {
+                    setAnalysisResult(JSON.parse(cleanedText));
+                } catch {
+                    throw new Error("Malformed JSON response from AI.");
+                }
+            } else {
+                throw new Error("Invalid response structure from API");
+            }
         } catch (error) {
-            console.error("Error saving journal entry:", error);
+            console.error("Error analyzing journal entry:", error);
+            setAnalysisResult({ tone: "Could not analyze entry.", themes: [], reflection: "Please try again later." });
         } finally {
-            setIsSaving(false);
+            setIsAnalysisLoading(false);
         }
     };
 
@@ -415,7 +573,7 @@ function JournalScreen({ user }) {
                 <textarea 
                     value={newEntry}
                     onChange={(e) => setNewEntry(e.target.value)}
-                    placeholder="What's on your mind?"
+                    placeholder="Write about your day, your thoughts, your feelings..."
                     className="w-full h-32 p-3 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500"
                 />
                 <div className="text-right mt-2">
@@ -425,169 +583,265 @@ function JournalScreen({ user }) {
                 </div>
             </div>
 
-            <div className="mt-8 flex-1 overflow-y-auto">
+            <div className="mt-8 flex-1 overflow-y-auto pr-2">
                 <h2 className="text-xl font-bold mb-4">Past Entries</h2>
                 <div className="space-y-4">
                     {entries.length > 0 ? entries.map(entry => (
                         <div key={entry.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm">
-                            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{entry.timestamp.toLocaleString()}</p>
+                            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{entry.timestamp?.toLocaleString()}</p>
                             <p className="whitespace-pre-wrap">{entry.content}</p>
+                            <div className="text-right mt-3">
+                                <button onClick={() => handleAnalyze(entry)} className="inline-flex items-center gap-2 text-sm font-medium text-cyan-600 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-200">
+                                    <Sparkles size={16} />
+                                    Get Insights ✨
+                                </button>
+                            </div>
                         </div>
                     )) : (
                         <p className="text-center text-slate-500 dark:text-slate-400 pt-8">Your journal is empty. Write your first entry above.</p>
                     )}
                 </div>
             </div>
+            {analyzingEntry && (
+                <AnalysisModal 
+                    isOpen={!!analyzingEntry}
+                    onClose={() => { setAnalyzingEntry(null); setAnalysisResult(null); }}
+                    isLoading={isAnalysisLoading}
+                    result={analysisResult}
+                />
+            )}
         </div>
     );
 }
 
-function ChatbotScreen({ user }) {
-    const [messages, setMessages] = useState([{ text: "Hello! I'm your AI Helper from EaseHaven. How can I support you today?", sender: 'bot' }]);
+function ProfileScreen() {
+    const { userData } = useAuth();
+    const [name, setName] = useState(userData?.name || '');
+    const [age, setAge] = useState(userData?.age || '');
+    const [occupation, setOccupation] = useState(userData?.occupation || '');
+    const [loading, setLoading] = useState(false);
+    const [message, setMessage] = useState('');
+
+    const handleUpdate = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setMessage('');
+        try {
+            const userRef = doc(db, 'users', userData.id);
+            await updateDoc(userRef, { name, age, occupation });
+            setMessage('Profile updated successfully!');
+        } catch (error) {
+            setMessage('Error updating profile.');
+            console.error(error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="max-w-2xl mx-auto">
+            <h1 className="text-3xl font-bold mb-6">Your Profile</h1>
+            <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-md">
+                <div className="flex items-center space-x-4 mb-8">
+                    <img src={userData?.profile_pic} alt="Profile" className="w-20 h-20 rounded-full bg-slate-200" />
+                    <div>
+                        <h2 className="text-2xl font-bold">{userData?.name}</h2>
+                        <p className="text-slate-500 dark:text-slate-400">{userData?.email}</p>
+                    </div>
+                </div>
+                <form onSubmit={handleUpdate} className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Name</label>
+                        <input type="text" value={name} onChange={e => setName(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Age</label>
+                        <input type="number" value={age} onChange={e => setAge(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Occupation</label>
+                        <input type="text" value={occupation} onChange={e => setOccupation(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                    </div>
+                    <div className="pt-2">
+                        <button type="submit" disabled={loading} className="w-full bg-cyan-500 text-white font-semibold py-2 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all disabled:bg-cyan-300">
+                            {loading ? 'Saving...' : 'Update Profile'}
+                        </button>
+                    </div>
+                    {message && <p className="text-green-500 text-sm text-center mt-2">{message}</p>}
+                </form>
+            </div>
+        </div>
+    );
+}
+
+
+// --- Components ---
+
+function Sidebar({ currentPage, setCurrentPage, toggleTheme, theme }) {
+    const navItems = [
+        { id: 'dashboard', icon: Home, label: 'Dashboard' },
+        { id: 'tracker', icon: Feather, label: 'Log Mood' },
+        { id: 'journal', icon: BookOpen, label: 'Journal' },
+        { id: 'profile', icon: User, label: 'Profile' },
+    ];
+
+    return (
+        <nav className="w-20 hover:w-64 transition-all duration-300 ease-in-out bg-white dark:bg-slate-800 shadow-lg flex flex-col justify-between group">
+            <div>
+                <div className="flex items-center justify-center h-20 border-b dark:border-slate-700">
+                    <Heart className="w-8 h-8 text-cyan-500" />
+                </div>
+                <ul>
+                    {navItems.map(item => (
+                        <li key={item.id} className="relative">
+                            <button onClick={() => setCurrentPage(item.id)} className={`flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700 ${currentPage === item.id ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-600 dark:text-cyan-300' : ''}`}>
+                                <item.icon className="w-6 h-6" />
+                                <span className="ml-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{item.label}</span>
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+            <div className="p-4 border-t dark:border-slate-700">
+                <button onClick={toggleTheme} className="flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700">
+                    {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
+                    <span className="ml-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">Theme</span>
+                </button>
+                <button onClick={() => signOut(auth)} className="flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700">
+                    <LogOut className="w-6 h-6" />
+                    <span className="ml-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">Logout</span>
+                </button>
+            </div>
+        </nav>
+    );
+}
+
+function AnalysisModal({ isOpen, onClose, isLoading, result }) {
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 w-full max-w-lg m-4">
+                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2"><Sparkles className="text-yellow-400"/> AI-Powered Insights</h2>
+                {isLoading ? (
+                    <div className="flex flex-col items-center justify-center h-48">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
+                        <p className="mt-4 text-slate-500 dark:text-slate-400">Analyzing your entry...</p>
+                    </div>
+                ) : result ? (
+                    <div className="space-y-4">
+                        <div>
+                            <h3 className="font-semibold text-slate-700 dark:text-slate-200">Emotional Tone:</h3>
+                            <p className="text-slate-600 dark:text-slate-300 italic">"{result.tone}"</p>
+                        </div>
+                        <div>
+                            <h3 className="font-semibold text-slate-700 dark:text-slate-200">Key Themes:</h3>
+                            <div className="flex flex-wrap gap-2 mt-1">
+                                {result.themes?.map((theme, i) => (
+                                    <span key={i} className="bg-cyan-100 text-cyan-800 text-xs font-medium px-2.5 py-0.5 rounded-full dark:bg-cyan-900 dark:text-cyan-300">{theme}</span>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <h3 className="font-semibold text-slate-700 dark:text-slate-200">A Question for Reflection:</h3>
+                            <p className="text-slate-600 dark:text-slate-300 italic">"{result.reflection}"</p>
+                        </div>
+                    </div>
+                ) : null}
+                <div className="text-right mt-6">
+                    <button onClick={onClose} className="py-2 px-5 rounded-lg bg-cyan-500 text-white font-semibold hover:bg-cyan-600">
+                        Close
+                    </button>
+                </div>
+                 <p className="text-xs text-slate-400 dark:text-slate-500 mt-4 text-center">Disclaimer: AI insights are for reflection and not a substitute for professional advice.</p>
+            </div>
+        </div>
+    );
+}
+
+function ChatAssistant() {
+    const [isOpen, setIsOpen] = useState(false);
+    const [messages, setMessages] = useState([{ text: "Hello! I'm your AI Helper. How can I support you today?", sender: 'bot' }]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef(null);
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    };
-
-    useEffect(scrollToBottom, [messages]);
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
 
     const handleSend = async () => {
         if (input.trim() === '') return;
-
         const userMessage = { text: input, sender: 'user' };
         setMessages(prev => [...prev, userMessage]);
         setInput('');
         setIsLoading(true);
 
         try {
-            // This is where you call the Gemini API
-            const chatHistory = messages.map(msg => ({
-                role: msg.sender === 'bot' ? 'model' : 'user',
-                parts: [{ text: msg.text }]
-            }));
-            
-            // Add a system instruction to guide the model's persona
-            const systemInstruction = {
-                role: "system",
-                parts: [{ text: "You are a caring and empathetic AI assistant for a mental wellness app called EaseHaven. Your goal is to provide supportive, helpful, and safe conversations. You are based on CBT principles but you are not a licensed therapist. Always include a disclaimer that you are not a substitute for professional help if the user discusses serious mental health issues. Keep responses concise and encouraging." }]
-            };
+            // FIX: Use environment variable for API key.
+            const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+            if (!apiKey) {
+                throw new Error("API Key not found");
+            }
 
-            const payload = { contents: [systemInstruction, ...chatHistory, { role: "user", parts: [{ text: input }] }] };
-            const apiKey = ""; // Leave empty, will be handled by the environment
+            const prompt = `You are a kind, empathetic, and motivational AI assistant for a mental wellness app called EaseHaven. Your goal is to provide supportive, helpful, and safe conversations. You are not a licensed therapist. Keep responses concise, positive, and encouraging. User's message: "${input}"`;
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
             const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-
-            if (!response.ok) {
-                throw new Error(`API call failed with status: ${response.status}`);
-            }
-
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
+            
             const result = await response.json();
-            
-            let botResponse = "I'm having a little trouble connecting right now. Please try again in a moment.";
-            if (result.candidates && result.candidates.length > 0 && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts.length > 0) {
-                botResponse = result.candidates[0].content.parts[0].text;
+            if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
+                const botResponse = result.candidates[0].content.parts[0].text;
+                setMessages(prev => [...prev, { text: botResponse, sender: 'bot' }]);
+            } else {
+                throw new Error("Invalid response structure from API");
             }
-            
-            setMessages(prev => [...prev, { text: botResponse, sender: 'bot' }]);
-
         } catch (error) {
-            console.error("Error calling Gemini API:", error);
-            setMessages(prev => [...prev, { text: "My apologies, I couldn't process that. Could you try rephrasing?", sender: 'bot' }]);
+            console.error("Chatbot API error:", error);
+            setMessages(prev => [...prev, { text: "I'm having a little trouble connecting. Please try again.", sender: 'bot' }]);
         } finally {
             setIsLoading(false);
         }
     };
 
     return (
-        <div className="h-full flex flex-col bg-white dark:bg-slate-800 rounded-xl shadow-md animate-fade-in">
-            <div className="p-4 border-b dark:border-slate-700">
-                <h1 className="text-xl font-bold flex items-center gap-2">
-                    <Bot className="text-cyan-500" />
-                    AI Helper
-                </h1>
-            </div>
-            <div className="flex-1 p-4 overflow-y-auto">
-                <div className="space-y-4">
-                    {messages.map((msg, index) => (
-                        <div key={index} className={`flex items-end gap-2 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            {msg.sender === 'bot' && <div className="w-8 h-8 rounded-full bg-cyan-500 flex items-center justify-center text-white flex-shrink-0"><Bot size={20} /></div>}
-                            <div className={`max-w-xs md:max-w-md lg:max-w-lg px-4 py-2 rounded-2xl ${msg.sender === 'user' ? 'bg-blue-500 text-white rounded-br-none' : 'bg-slate-200 dark:bg-slate-700 rounded-bl-none'}`}>
-                                <p>{msg.text}</p>
-                            </div>
-                        </div>
-                    ))}
-                    {isLoading && (
-                        <div className="flex items-end gap-2 justify-start">
-                             <div className="w-8 h-8 rounded-full bg-cyan-500 flex items-center justify-center text-white flex-shrink-0"><Bot size={20} /></div>
-                             <div className="px-4 py-3 rounded-2xl bg-slate-200 dark:bg-slate-700 rounded-bl-none">
-                                <div className="flex items-center gap-1">
-                                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></span>
-                                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-75"></span>
-                                    <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-150"></span>
+        <>
+            <button onClick={() => setIsOpen(!isOpen)} className="fixed bottom-6 right-6 bg-cyan-500 text-white w-16 h-16 rounded-full shadow-lg flex items-center justify-center hover:bg-cyan-600 transition-transform hover:scale-110 z-40">
+                <MessageSquare className="w-8 h-8" />
+            </button>
+            {isOpen && (
+                <div className="fixed bottom-24 right-6 w-full max-w-sm h-[60vh] bg-white dark:bg-slate-800 rounded-2xl shadow-2xl flex flex-col animate-fade-in-up z-50">
+                    <div className="p-4 border-b dark:border-slate-700 flex justify-between items-center">
+                        <h2 className="font-bold text-lg">AI Helper</h2>
+                        <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-slate-800 dark:hover:text-white text-2xl">&times;</button>
+                    </div>
+                    <div className="flex-1 p-4 overflow-y-auto space-y-4">
+                        {messages.map((msg, index) => (
+                            <div key={index} className={`flex items-end gap-2 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                {msg.sender === 'bot' && <div className="w-8 h-8 rounded-full bg-cyan-500 flex items-center justify-center text-white flex-shrink-0"><Bot size={20} /></div>}
+                                <div className={`max-w-xs px-4 py-2 rounded-2xl ${msg.sender === 'user' ? 'bg-blue-500 text-white rounded-br-none' : 'bg-slate-200 dark:bg-slate-700 rounded-bl-none'}`}>
+                                    <p className="text-sm">{msg.text}</p>
                                 </div>
                             </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </div>
-            </div>
-            <div className="p-4 border-t dark:border-slate-700">
-                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && !isLoading && handleSend()}
-                        placeholder="Type your message..."
-                        className="w-full bg-transparent p-2 focus:outline-none"
-                        disabled={isLoading}
-                    />
-                    <button onClick={handleSend} disabled={isLoading || !input.trim()} className="p-2 bg-cyan-500 text-white rounded-md disabled:bg-cyan-300 disabled:cursor-not-allowed hover:bg-cyan-600 transition-colors">
-                        <ArrowRight size={20} />
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function MeditateScreen() {
-    const meditations = [
-        { title: '5-Minute Mindful Breathing', duration: '5 min', type: 'Breathing', description: 'Center yourself with this short, guided breathing exercise.' },
-        { title: '10-Minute Body Scan', duration: '10 min', type: 'Body Scan', description: 'Release tension from head to toe by bringing awareness to your body.' },
-        { title: 'Gratitude Meditation', duration: '7 min', type: 'Mindfulness', description: 'Cultivate a sense of gratitude and positivity.' },
-        { title: 'Stress Relief Visualization', duration: '12 min', type: 'Visualization', description: 'Imagine a peaceful place and let your stress melt away.' },
-    ];
-
-    return (
-        <div className="animate-fade-in">
-            <h1 className="text-3xl font-bold">Guided Meditations</h1>
-            <p className="text-slate-500 dark:text-slate-400 mt-1">Find a moment of peace and calm.</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-8">
-                {meditations.map((med, index) => (
-                    <div key={index} className="bg-white dark:bg-slate-800 rounded-xl shadow-md p-6 flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-300">
-                        <div>
-                            <span className="text-xs font-semibold bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200 py-1 px-2 rounded-full">{med.type}</span>
-                            <h2 className="text-xl font-bold mt-3">{med.title}</h2>
-                            <p className="text-slate-500 dark:text-slate-400 mt-2 text-sm">{med.description}</p>
-                        </div>
-                        <div className="flex items-center justify-between mt-4">
-                            <p className="text-sm font-medium">{med.duration}</p>
-                            <button className="bg-cyan-500 text-white font-bold py-2 px-4 rounded-lg text-sm hover:bg-cyan-600">
-                                Begin
+                        ))}
+                         {isLoading && <div className="flex justify-start"><p className="text-sm text-slate-400">AI is typing...</p></div>}
+                        <div ref={messagesEndRef} />
+                    </div>
+                    <div className="p-4 border-t dark:border-slate-700">
+                        <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-700 rounded-lg p-1">
+                            <input type="text" value={input} onChange={e => setInput(e.target.value)} onKeyPress={e => e.key === 'Enter' && !isLoading && handleSend()} placeholder="Type a message..." className="w-full bg-transparent p-2 focus:outline-none" disabled={isLoading} />
+                            <button onClick={handleSend} disabled={isLoading || !input.trim()} className="p-2 bg-cyan-500 text-white rounded-md disabled:bg-cyan-300 hover:bg-cyan-600">
+                                <Send size={18} />
                             </button>
                         </div>
                     </div>
-                ))}
-            </div>
-        </div>
+                </div>
+            )}
+        </>
     );
 }
