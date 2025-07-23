@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+// Add GoogleAuthProvider and signInWithPopup to this line
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, onSnapshot, updateDoc, serverTimestamp, orderBy, where } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { ArrowRight, Bot, Feather, Heart, Home, LogOut, MessageSquare, Sun, Moon, User, Settings, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb } from 'lucide-react';
@@ -8,14 +9,13 @@ import { ArrowRight, Bot, Feather, Heart, Home, LogOut, MessageSquare, Sun, Moon
 // --- Firebase Configuration ---
 // This configuration is for your Firebase project.
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.REACT_APP_FIREBASE_APP_ID
+  apiKey: "AIzaSyDoxbgjjPOsSlgYNGlDQlBIkS3Aft46Ud0",
+  authDomain: "easehaven-wellness-app.firebaseapp.com",
+  projectId: "easehaven-wellness-app",
+  storageBucket: "easehaven-wellness-app.firebasestorage.app",
+  messagingSenderId: "526675114160",
+  appId: "1:526675114160:web:9b31c080e2d3185a42e375"
 };
-
 
 const appId = 'easehaven-v2';
 
@@ -120,6 +120,40 @@ function AuthScreen() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
+    const handleGoogleSignIn = async () => {
+      setLoading(true);
+      setError('');
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      try {
+          const result = await signInWithPopup(auth, provider);
+          const user = result.user;
+
+          const userDocRef = doc(db, 'users', user.uid);
+          const docSnap = await getDoc(userDocRef);
+
+          if (!docSnap.exists()) {
+              await setDoc(userDocRef, {
+                  name: user.displayName,
+                  email: user.email,
+                  createdAt: serverTimestamp(),
+                  age: '',
+                  occupation: '',
+                  profile_pic: user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${user.displayName}`
+              });
+              await setDoc(doc(db, 'streaks', user.uid), {
+                  current_streak: 0,
+                  longest_streak: 0,
+                  last_logged_date: null
+              });
+          }
+      } catch (err) {
+          setError(err.message.replace('Firebase: ', ''));
+      } finally {
+          setLoading(false);
+      }
+    };
+
     const handleAuth = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -158,6 +192,18 @@ function AuthScreen() {
                     <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Welcome to EaseHaven</h1>
                     <p className="text-slate-500 dark:text-slate-400">{isLogin ? 'Sign in to continue' : 'Create your account'}</p>
                 </div>
+
+                <button onClick={handleGoogleSignIn} disabled={loading} className="w-full flex items-center justify-center gap-2 bg-white text-slate-700 font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-slate-50 transition-all duration-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">
+                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google icon" className="w-6 h-6" />
+                    Sign in with Google
+                </button>
+
+                <div className="relative flex py-2 items-center">
+                    <div className="flex-grow border-t border-slate-200 dark:border-slate-600"></div>
+                    <span className="flex-shrink mx-4 text-slate-400 text-xs uppercase">Or continue with</span>
+                    <div className="flex-grow border-t border-slate-200 dark:border-slate-600"></div>
+                </div>
+                
                 <form onSubmit={handleAuth} className="space-y-4">
                     {!isLogin && (
                         <input type="text" placeholder="Your Name" value={name} onChange={e => setName(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
