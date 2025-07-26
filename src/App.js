@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
-// Add GoogleAuthProvider and signInWithPopup to this line
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, onSnapshot, updateDoc, serverTimestamp, orderBy, where } from 'firebase/firestore';
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail, sendEmailVerification } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { ArrowRight, Bot, Feather, Heart, Home, LogOut, MessageSquare, Sun, Moon, User, Settings, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb } from 'lucide-react';
+import { Bot, Feather, Home, LogOut, MessageSquare, Sun, Moon, User, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb, Shield, ShieldOff, ChevronsLeft, ChevronsRight, AlertTriangle, MailCheck } from 'lucide-react';
 
-// --- Firebase Configuration ---
-// This configuration is for your Firebase project.
+// --- Firebase Configuration & Initialization ---
+// TODO: Replace this with your own Firebase project configuration.
+// You can get this from the Firebase console for your project.
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -16,18 +16,46 @@ const firebaseConfig = {
   messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
+const appId = 'easehaven-web-app'; 
 
-const appId = 'easehaven-v2';
-
-
-// --- Initialize Firebase ---
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// --- Helper Components ---
+const Logo = ({ className }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L2 12h3v8h14v-8h3L12 2z" className="text-cyan-500/20 dark:text-cyan-400/20" fill="currentColor"/>
+        <path d="M12 5.69l-5 4.5V18h10v-7.81l-5-4.5zM12 3l9 8h-3v8H6v-8H3l9-8z" className="text-cyan-500/50 dark:text-cyan-400/50" fill="currentColor" />
+        <path d="M12 11.2C10.8 10 8.8 10.8 8.8 12.6C8.8 14.4 12 18 12 18S15.2 14.4 15.2 12.6C15.2 10.8 13.2 10 12 11.2z" className="text-pink-500 dark:text-pink-400" fill="currentColor"/>
+    </svg>
+);
+
+const ErrorDisplay = ({ message }) => {
+    if (!message) return null;
+    return (
+        <div className="bg-red-100 dark:bg-red-900/30 border-l-4 border-red-500 text-red-700 dark:text-red-300 p-3 rounded-md my-2 text-sm flex items-center gap-3">
+            <AlertTriangle size={20} className="flex-shrink-0" />
+            <span>{message}</span>
+        </div>
+    );
+};
+
+const EmailVerificationNotice = ({ user, onResend }) => {
+    if (!user || user.emailVerified) return null;
+    return (
+        <div className="bg-yellow-100 dark:bg-yellow-900/30 border-l-4 border-yellow-500 text-yellow-800 dark:text-yellow-300 p-4 rounded-lg my-4">
+            <h4 className="font-bold">Verify Your Email Address</h4>
+            <p className="text-sm mt-1">To ensure your account is secure, please check your inbox for a verification link. Your account is not fully active until your email is verified.</p>
+            <button onClick={onResend} className="text-sm font-semibold text-yellow-900 dark:text-yellow-200 hover:underline mt-2">Resend Verification Email</button>
+        </div>
+    );
+};
+
+
 // --- Authentication Context ---
 const AuthContext = createContext();
-const useAuth = () => useContext(AuthContext);
+export const useAuth = () => useContext(AuthContext);
 
 const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
@@ -37,21 +65,64 @@ const AuthProvider = ({ children }) => {
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
             if (firebaseUser) {
+                // Reload the user to get the latest emailVerified status
+                await firebaseUser.reload();
+                
+                // If the user has signed up but not verified, keep them on the auth screen
+                if (!firebaseUser.emailVerified && !firebaseUser.providerData.some(p => p.providerId === 'google.com')) {
+                    setUser(firebaseUser); // Set user to allow resend verification
+                    setUserData(null);
+                    setLoading(false);
+                    return;
+                }
+
                 const userDocRef = doc(db, 'users', firebaseUser.uid);
-                const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
+                
+                try {
+                    const docSnap = await getDoc(userDocRef);
+                    if (!docSnap.exists()) {
+                        const initialData = {
+                            name: firebaseUser.displayName || 'New User',
+                            email: firebaseUser.email || '',
+                            createdAt: serverTimestamp(),
+                            age: '',
+                            occupation: '',
+                            profile_pic: firebaseUser.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${firebaseUser.displayName || 'User'}`
+                        };
+                        await setDoc(userDocRef, initialData);
+                        const streakRef = doc(db, `users/${firebaseUser.uid}/streaks`, 'data');
+                        await setDoc(streakRef, { current_streak: 0, longest_streak: 0, last_logged_date: null });
+                    }
+                } catch (error) {
+                    console.error("Error ensuring user document exists:", error);
+                    setUser(firebaseUser);
+                    setUserData(null); 
+                    setLoading(false);
+                    return;
+                }
+
+                const docUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
                     if (docSnap.exists()) {
                         setUserData({ id: docSnap.id, ...docSnap.data() });
                     }
                     setUser(firebaseUser);
                     setLoading(false);
+                }, (error) => {
+                    console.error("Firestore snapshot error on user document:", error);
+                    setUser(firebaseUser);
+                    setUserData(null);
+                    setLoading(false);
                 });
-                return () => unsubscribeDoc();
+
+                return () => docUnsubscribe();
+
             } else {
                 setUser(null);
                 setUserData(null);
                 setLoading(false);
             }
         });
+
         return () => unsubscribe();
     }, []);
 
@@ -70,22 +141,35 @@ export default function App() {
 }
 
 function MainApp() {
-    const { user } = useAuth();
+    const { user, loading } = useAuth();
     const [currentPage, setCurrentPage] = useState('dashboard');
     const [theme, setTheme] = useState('light');
+    const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
+
+    useEffect(() => {
+        const storedTheme = localStorage.getItem('easehaven-theme');
+        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const initialTheme = storedTheme || (systemPrefersDark ? 'dark' : 'light');
+        setTheme(initialTheme);
+    }, []);
 
     useEffect(() => {
         const root = document.documentElement;
-        if (theme === 'dark') {
-            root.classList.add('dark');
-        } else {
-            root.classList.remove('dark');
-        }
+        root.classList.toggle('dark', theme === 'dark');
+        localStorage.setItem('easehaven-theme', theme);
     }, [theme]);
 
     const toggleTheme = () => setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
 
-    if (!user) {
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-slate-50 dark:bg-slate-900">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-cyan-500"></div>
+            </div>
+        );
+    }
+
+    if (!user || !user.emailVerified) {
         return <AuthScreen />;
     }
     
@@ -101,7 +185,14 @@ function MainApp() {
 
     return (
         <div className={`min-h-screen font-sans bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 flex`}>
-            <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} toggleTheme={toggleTheme} theme={theme} />
+            <Sidebar 
+                currentPage={currentPage} 
+                setCurrentPage={setCurrentPage} 
+                toggleTheme={toggleTheme} 
+                theme={theme}
+                isExpanded={isSidebarExpanded}
+                setIsExpanded={setIsSidebarExpanded}
+            />
             <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
                 {renderPage()}
             </main>
@@ -113,160 +204,225 @@ function MainApp() {
 // --- Screens ---
 
 function AuthScreen() {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [name, setName] = useState('');
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); 
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
 
-    const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = async () => {
       setLoading(true);
       setError('');
+      setMessage('');
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       try {
-          const result = await signInWithPopup(auth, provider);
-          const user = result.user;
+          await signInWithPopup(auth, provider);
+      } catch (err) {
+          setError(err.message.replace('Firebase: ', ''));
+          setLoading(false);
+      }
+  };
 
-          const userDocRef = doc(db, 'users', user.uid);
-          const docSnap = await getDoc(userDocRef);
-
-          if (!docSnap.exists()) {
-              await setDoc(userDocRef, {
-                  name: user.displayName,
-                  email: user.email,
-                  createdAt: serverTimestamp(),
-                  age: '',
-                  occupation: '',
-                  profile_pic: user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${user.displayName}`
-              });
-              await setDoc(doc(db, 'streaks', user.uid), {
-                  current_streak: 0,
-                  longest_streak: 0,
-                  last_logged_date: null
-              });
+  const handleEmailAuth = async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      setError('');
+      setMessage('');
+      try {
+          if (authMode === 'login') {
+              await signInWithEmailAndPassword(auth, email, password);
+          } else {
+              const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+              await sendEmailVerification(userCredential.user);
+              setVerificationSent(true);
           }
       } catch (err) {
           setError(err.message.replace('Firebase: ', ''));
       } finally {
           setLoading(false);
       }
-    };
+  };
 
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        setLoading(true);
-        setError('');
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                await setDoc(doc(db, 'users', userCredential.user.uid), {
-                    name,
-                    email,
-                    createdAt: serverTimestamp(),
-                    age: '',
-                    occupation: '',
-                    profile_pic: `https://api.dicebear.com/7.x/initials/svg?seed=${name}`
-                });
-                await setDoc(doc(db, 'streaks', userCredential.user.uid), {
-                    current_streak: 0,
-                    longest_streak: 0,
-                    last_logged_date: null
-                });
-            }
-        } catch (err) {
-            setError(err.message.replace('Firebase: ', ''));
-        } finally {
-            setLoading(false);
+  const handleResendVerification = async () => {
+    setLoading(true);
+    setError('');
+    setMessage('');
+    try {
+        if(auth.currentUser){
+            await sendEmailVerification(auth.currentUser);
+            setMessage('A new verification email has been sent.');
+        } else {
+            setError("Could not find user. Please try logging in again.");
         }
-    };
+    } catch (err) {
+        setError(err.message.replace('Firebase: ', ''));
+    } finally {
+        setLoading(false);
+    }
+  };
 
+  const handlePasswordReset = async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      setError('');
+      setMessage('');
+      try {
+          await sendPasswordResetEmail(auth, email);
+          setMessage(`If an account exists for ${email}, a password reset link has been sent. Please check your inbox and spam folder.`);
+      } catch (err) {
+          setError(err.message.replace('Firebase: ', ''));
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const getTitle = () => {
+      if (authMode === 'login') return 'Sign in to continue';
+      if (authMode === 'signup') return 'Create your account';
+      return 'Reset your password';
+  };
+
+  if (verificationSent) {
     return (
         <div className="flex flex-col items-center justify-center w-full min-h-screen bg-gradient-to-br from-cyan-50 to-blue-100 dark:from-slate-800 dark:to-slate-900">
-            <div className="w-full max-w-md p-8 space-y-6 bg-white dark:bg-slate-800 rounded-2xl shadow-lg">
-                <div className="text-center">
-                    <Heart className="w-12 h-12 text-cyan-500 mx-auto mb-2" />
-                    <h1 className="text-3xl font-bold text-slate-800 dark:text-white">Welcome to EaseHaven</h1>
-                    <p className="text-slate-500 dark:text-slate-400">{isLogin ? 'Sign in to continue' : 'Create your account'}</p>
-                </div>
-
-                <button onClick={handleGoogleSignIn} disabled={loading} className="w-full flex items-center justify-center gap-2 bg-white text-slate-700 font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-slate-50 transition-all duration-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">
-                    <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google icon" className="w-6 h-6" />
-                    Sign in with Google
-                </button>
-
-                <div className="relative flex py-2 items-center">
-                    <div className="flex-grow border-t border-slate-200 dark:border-slate-600"></div>
-                    <span className="flex-shrink mx-4 text-slate-400 text-xs uppercase">Or continue with</span>
-                    <div className="flex-grow border-t border-slate-200 dark:border-slate-600"></div>
-                </div>
-                
-                <form onSubmit={handleAuth} className="space-y-4">
-                    {!isLogin && (
-                        <input type="text" placeholder="Your Name" value={name} onChange={e => setName(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                    )}
-                    <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                    <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                    <button type="submit" disabled={loading} className="w-full bg-cyan-500 text-white font-semibold py-3 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all duration-300 disabled:bg-cyan-300">
-                        {loading ? 'Processing...' : (isLogin ? 'Login' : 'Sign Up')}
-                    </button>
-                    {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-                </form>
-                <p className="text-center text-sm text-slate-500 dark:text-slate-400">
-                    {isLogin ? "Don't have an account?" : "Already have an account?"}
-                    <button onClick={() => setIsLogin(!isLogin)} className="font-semibold text-cyan-500 hover:underline ml-1">
-                        {isLogin ? 'Sign Up' : 'Login'}
-                    </button>
+            <div className="w-full max-w-md p-8 space-y-6 bg-white dark:bg-slate-800 rounded-2xl shadow-lg text-center">
+                <MailCheck className="w-16 h-16 text-green-500 mx-auto" />
+                <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Verify Your Email</h1>
+                <p className="text-slate-500 dark:text-slate-400">
+                    We've sent a verification link to <span className="font-semibold text-cyan-500">{email}</span>. Please click the link in the email to activate your account.
                 </p>
+                <ErrorDisplay message={error} />
+                {message && <p className="text-green-600 dark:text-green-400 text-sm text-center bg-green-100 dark:bg-green-900 p-3 rounded-md">{message}</p>}
+                <div className="space-y-3 pt-4">
+                    <p className="text-xs text-slate-400 dark:text-slate-500">
+                        Once verified, you will be logged in automatically.
+                    </p>
+                    <button onClick={handleResendVerification} disabled={loading} className="w-full text-sm font-medium text-cyan-500 hover:underline disabled:opacity-50">
+                        {loading ? 'Sending...' : "Didn't receive the email? Resend"}
+                    </button>
+                    <button onClick={() => { setVerificationSent(false); setAuthMode('login'); signOut(auth); }} className="w-full text-sm font-medium text-slate-500 hover:underline">
+                        Back to Login
+                    </button>
+                </div>
             </div>
         </div>
     );
+  }
+
+  return (
+      <div className="flex flex-col items-center justify-center w-full min-h-screen bg-gradient-to-br from-cyan-50 to-blue-100 dark:from-slate-800 dark:to-slate-900">
+          <div className="w-full max-w-md p-8 space-y-4 bg-white dark:bg-slate-800 rounded-2xl shadow-lg">
+              <div className="text-center">
+                  <Logo className="w-16 h-16 mx-auto mb-2" />
+                  <h1 className="text-3xl font-bold text-slate-800 dark:text-white">
+                      {authMode === 'reset' ? 'Forgot Password' : 'Welcome to EaseHaven'}
+                  </h1>
+                  <p className="text-slate-500 dark:text-slate-400">{getTitle()}</p>
+              </div>
+              
+              <ErrorDisplay message={error} />
+              {message && <p className="text-green-600 dark:text-green-400 text-sm text-center bg-green-100 dark:bg-green-900 p-3 rounded-md">{message}</p>}
+
+              {authMode !== 'reset' && (
+                  <>
+                      <button onClick={handleGoogleSignIn} disabled={loading} className="w-full flex items-center justify-center gap-2 bg-white text-slate-700 font-semibold py-3 px-4 rounded-lg shadow-md hover:bg-slate-50 transition-all duration-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">
+                          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google icon" className="w-6 h-6" />
+                          Sign in with Google
+                      </button>
+                      <div className="relative flex py-2 items-center">
+                          <div className="flex-grow border-t border-slate-200 dark:border-slate-600"></div>
+                          <span className="flex-shrink mx-4 text-slate-400 text-xs uppercase">Or</span>
+                          <div className="flex-grow border-t border-slate-200 dark:border-slate-600"></div>
+                      </div>
+                  </>
+              )}
+
+              <form onSubmit={authMode === 'reset' ? handlePasswordReset : handleEmailAuth} className="space-y-4">
+                  {authMode === 'signup' && (
+                      <input type="text" placeholder="Your Name" value={name} onChange={e => setName(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                  )}
+                  <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                  {authMode !== 'reset' && (
+                      <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required className="w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                  )}
+                  
+                  {authMode === 'login' && (
+                      <div className="text-right">
+                          <button type="button" onClick={() => { setAuthMode('reset'); setError(''); setMessage(''); }} className="text-sm font-medium text-cyan-500 hover:underline">
+                              Forgot Password?
+                          </button>
+                      </div>
+                  )}
+
+                  <button type="submit" disabled={loading} className="w-full bg-cyan-500 text-white font-semibold py-3 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all duration-300 disabled:bg-cyan-300">
+                      {loading ? 'Processing...' : (authMode === 'login' ? 'Login' : authMode === 'signup' ? 'Sign Up' : 'Send Reset Link')}
+                  </button>
+              </form>
+
+              <p className="text-center text-sm text-slate-500 dark:text-slate-400">
+                  {authMode === 'login' ? "Don't have an account?" : "Already have an account?"}
+                  <button onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setError(''); setMessage(''); }} className="font-semibold text-cyan-500 hover:underline ml-1">
+                      {authMode === 'login' ? 'Sign Up' : 'Login'}
+                  </button>
+              </p>
+          </div>
+      </div>
+  );
+}
+
+async function callGeminiAPI(prompt, isJson = false) {
+    // TODO: Add your Gemini API key to a .env.local file in your project root
+    // Example: REACT_APP_GEMINI_API_KEY=YOUR_API_KEY
+    const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
+    if (!apiKey) {
+        console.error("Gemini API key not found. Please set it in your .env.local file.");
+        throw new Error("API key not configured.");
+    }
+    
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+    if (isJson) {
+        payload.generationConfig = { responseMimeType: "application/json" };
+    }
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error(`API call failed with status: ${response.status}`);
+        const result = await response.json();
+        if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
+            const text = result.candidates[0].content.parts[0].text;
+            return isJson ? JSON.parse(text.replace(/```json|```/g, '').trim()) : text;
+        } else {
+            throw new Error("Invalid response structure from API");
+        }
+    } catch (error) {
+        console.error("Error calling Gemini API:", error);
+        throw error;
+    }
 }
 
 function DashboardScreen({ onNavigate }) {
-    const { userData } = useAuth();
+    const { user, userData } = useAuth();
     const [moodLogs, setMoodLogs] = useState([]);
     const [streaks, setStreaks] = useState({ current_streak: 0, longest_streak: 0 });
     const [thoughtOfTheDay, setThoughtOfTheDay] = useState('');
     const [thoughtLoading, setThoughtLoading] = useState(true);
+    const [verificationMessage, setVerificationMessage] = useState('');
 
     useEffect(() => {
         const getThoughtOfTheDay = async () => {
             setThoughtLoading(true);
-            // FIX: Use environment variable for API key.
-            const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
-            if (!apiKey) {
-                console.error("Gemini API key not found. Please set REACT_APP_GEMINI_API_KEY in your .env.local file.");
-                setThoughtOfTheDay("Every small step forward is still a step forward. Be proud of your progress.");
-                setThoughtLoading(false);
-                return;
-            }
-
             const prompt = "Provide a short, uplifting, and motivational 'thought of the day' for a user of a mental wellness app. It should be one or two sentences. Do not include quotation marks or any prefixes like 'Thought of the Day:'.";
             try {
-                const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    throw new Error(`API call failed with status: ${response.status}`);
-                }
-
-                const result = await response.json();
-                if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
-                    setThoughtOfTheDay(result.candidates[0].content.parts[0].text);
-                } else {
-                    throw new Error("Invalid response structure from API");
-                }
+                const thought = await callGeminiAPI(prompt);
+                setThoughtOfTheDay(thought);
             } catch (error) {
-                console.error("Error fetching thought of the day:", error);
                 setThoughtOfTheDay("Every small step forward is still a step forward. Be proud of your progress.");
             } finally {
                 setThoughtLoading(false);
@@ -276,32 +432,34 @@ function DashboardScreen({ onNavigate }) {
     }, []);
 
     useEffect(() => {
-        if (userData) {
-            const q = query(collection(db, `users/${userData.id}/mood_entries`), orderBy("timestamp", "asc"));
-            const unsubscribe = onSnapshot(q, (snapshot) => {
-                const logs = [];
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    if (data.timestamp) {
-                        logs.push({ id: doc.id, ...data, timestamp: data.timestamp.toDate() });
-                    }
-                });
+        if (userData && user) {
+            const moodEntriesPath = `users/${user.uid}/mood_entries`;
+            const q = query(collection(db, moodEntriesPath));
+            const unsubscribeMoods = onSnapshot(q, (snapshot) => {
+                const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() }));
+                logs.sort((a, b) => a.timestamp - b.timestamp);
                 setMoodLogs(logs);
             });
             
-            const streakRef = doc(db, 'streaks', userData.id);
+            const streakRef = doc(db, `users/${user.uid}/streaks`, 'data');
             const unsubStreaks = onSnapshot(streakRef, (doc) => {
-                if (doc.exists()) {
-                    setStreaks(doc.data());
-                }
+                setStreaks(doc.exists() ? doc.data() : { current_streak: 0, longest_streak: 0 });
             });
 
             return () => {
-                unsubscribe();
+                unsubscribeMoods();
                 unsubStreaks();
             };
         }
-    }, [userData]);
+    }, [user, userData]);
+
+    const handleResendVerification = () => {
+        if (user) {
+            sendEmailVerification(user)
+                .then(() => setVerificationMessage("A new verification email has been sent."))
+                .catch(err => setVerificationMessage(`Error: ${err.message}`));
+        }
+    };
 
     const chartData = moodLogs.slice(-7).map(log => ({
         date: log.timestamp ? log.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A',
@@ -317,8 +475,17 @@ function DashboardScreen({ onNavigate }) {
     const MOOD_COLORS = { 'Happy': '#34D399', 'Calm': '#60A5FA', 'Okay': '#A78BFA', 'Sad': '#F472B6', 'Anxious': '#FBBF24', 'Angry': '#F87171' };
 
     return (
-        <div className="animate-fade-in space-y-8">
-            <h1 className="text-3xl font-bold">Welcome back, {userData?.name || 'friend'}.</h1>
+        <div className="animate-fade-in space-y-6">
+            <div className="flex items-center gap-4">
+                <Logo className="w-12 h-12" />
+                <div>
+                    <h1 className="text-3xl font-bold">EaseHaven</h1>
+                    <p className="text-slate-500 dark:text-slate-400">Welcome back, {userData?.name || 'friend'}.</p>
+                </div>
+            </div>
+
+            <EmailVerificationNotice user={user} onResend={handleResendVerification} />
+            {verificationMessage && <p className="text-sm text-green-600">{verificationMessage}</p>}
             
             <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md flex items-start gap-4">
                 <Lightbulb className="w-8 h-8 text-yellow-400 flex-shrink-0 mt-1" />
@@ -375,7 +542,7 @@ function DashboardScreen({ onNavigate }) {
                     <ResponsiveContainer width="100%" height={300}>
                         <PieChart>
                             <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                                {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={MOOD_COLORS[entry.name]} />)}
+                                {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={MOOD_COLORS[entry.name] || '#cccccc'} />)}
                             </Pie>
                             <Tooltip />
                             <Legend />
@@ -396,89 +563,58 @@ function MoodTrackerScreen({ onLogSuccess }) {
     const [suggestion, setSuggestion] = useState(null);
 
     const moodOptions = [
-        { name: 'Happy', icon: Laugh },
-        { name: 'Calm', icon: Smile },
-        { name: 'Okay', icon: Meh },
-        { name: 'Sad', icon: Frown },
-        { name: 'Anxious', icon: Frown },
-        { name: 'Angry', icon: Angry },
+        { name: 'Happy', icon: Laugh }, { name: 'Calm', icon: Smile }, { name: 'Okay', icon: Meh },
+        { name: 'Sad', icon: Frown }, { name: 'Anxious', icon: Frown }, { name: 'Angry', icon: Angry },
     ];
 
     const getAISuggestion = async (mood, stress, userNote) => {
-        // FIX: Use environment variable for API key.
-        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
-        if (!apiKey) {
-            console.error("Gemini API key not found.");
-            setSuggestion({ title: "A Moment for You", content: "Take a brief pause. Step away from your screen, stretch, or listen to a favorite song. Sometimes a small break is all you need." });
-            return;
-        }
-
-        const prompt = `A user in a mental wellness app feels "${mood}" with a stress level of ${stress}/10. Their journal note is: "${userNote}". Based on this, provide one simple, safe, non-medical, actionable suggestion for an activity to help them. The suggestion should be encouraging and empathetic. The response must be a JSON object with two keys: "title" (a short, catchy title for the activity) and "content" (a 2-3 sentence description of the activity). Example format: {"title": "Mindful Breathing", "content": "Take a few moments to focus on your breath. Inhale deeply for 4 seconds, hold for 4, and exhale for 6. This can help calm your nervous system."}`;
-        
+        const prompt = `A user in a mental wellness app feels "${mood}" with a stress level of ${stress}/10. Their journal note is: "${userNote}". Based on this, provide one simple, safe, non-medical, actionable suggestion for an activity to help them. The suggestion should be encouraging and empathetic. The response must be a JSON object with two keys: "title" (a short, catchy title for the activity) and "content" (a 2-3 sentence description of the activity).`;
         try {
-            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (!response.ok) throw new Error(`API error: ${response.status}`);
-            
-            const result = await response.json();
-            if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
-                const text = result.candidates[0].content.parts[0].text;
-                const cleanedText = text.replace(/```json|```/g, '').trim();
-                try {
-                    setSuggestion(JSON.parse(cleanedText));
-                } catch {
-                    throw new Error("Malformed JSON response from AI.");
-                }
-            } else {
-                 throw new Error("Invalid response structure from API");
-            }
+            const result = await callGeminiAPI(prompt, true);
+            setSuggestion(result);
         } catch (error) {
-            console.error("Error fetching AI suggestion:", error);
             setSuggestion({ title: "A Moment for You", content: "Take a brief pause. Step away from your screen, stretch, or listen to a favorite song. Sometimes a small break is all you need." });
         }
     };
 
     const handleLogMood = async (e) => {
         e.preventDefault();
-        if (!mood) return;
+        if (!mood || !user) return;
         setLoading(true);
 
-        await addDoc(collection(db, `users/${user.uid}/mood_entries`), {
-            mood,
-            stress_level: parseInt(stressLevel),
-            note,
-            timestamp: serverTimestamp()
+        const moodCollectionRef = collection(db, `users/${user.uid}/mood_entries`);
+        await addDoc(moodCollectionRef, {
+            mood, stress_level: parseInt(stressLevel), note, timestamp: serverTimestamp()
         });
         
-        const streakRef = doc(db, 'streaks', user.uid);
+        const streakRef = doc(db, `users/${user.uid}/streaks`, 'data');
         const streakSnap = await getDoc(streakRef);
+        
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
         if (streakSnap.exists()) {
             const streakData = streakSnap.data();
-            const today = new Date().setHours(0, 0, 0, 0);
-            const lastLogged = streakData.last_logged_date?.toDate().setHours(0, 0, 0, 0);
-            
-            let newStreak = streakData.current_streak || 0;
-            if (lastLogged !== today) {
+            const lastLoggedDate = streakData.last_logged_date?.toDate();
+            if (lastLoggedDate) {
+                lastLoggedDate.setHours(0, 0, 0, 0);
+            }
+
+            if (lastLoggedDate?.getTime() !== today.getTime()) {
                 const yesterday = new Date();
                 yesterday.setDate(yesterday.getDate() - 1);
-                const yesterdayTime = yesterday.setHours(0,0,0,0);
+                yesterday.setHours(0, 0, 0, 0);
 
-                if (lastLogged === yesterdayTime) {
-                    newStreak++;
-                } else {
-                    newStreak = 1;
-                }
+                let newStreak = (lastLoggedDate?.getTime() === yesterday.getTime()) ? (streakData.current_streak || 0) + 1 : 1;
+                
                 await updateDoc(streakRef, {
                     current_streak: newStreak,
                     longest_streak: Math.max(newStreak, streakData.longest_streak || 0),
                     last_logged_date: new Date()
                 });
             }
+        } else {
+             await setDoc(streakRef, { current_streak: 1, longest_streak: 1, last_logged_date: new Date() });
         }
 
         await getAISuggestion(mood, stressLevel, note);
@@ -534,6 +670,56 @@ function MoodTrackerScreen({ onLogSuccess }) {
 }
 
 function JournalScreen() {
+    const { user, userData } = useAuth();
+    const [isLocked, setIsLocked] = useState(true);
+    const [pin, setPin] = useState('');
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (userData && userData.journalPin) {
+            setIsLocked(true);
+        } else {
+            setIsLocked(false);
+        }
+    }, [userData]);
+    
+    const handleUnlock = () => {
+        if (pin === userData.journalPin) {
+            setIsLocked(false);
+            setError('');
+        } else {
+            setError('Incorrect PIN. Please try again.');
+        }
+        setPin('');
+    };
+
+    if (isLocked) {
+        return (
+            <div className="flex items-center justify-center h-full">
+                <div className="w-full max-w-sm bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-lg text-center">
+                    <Shield className="w-16 h-16 text-cyan-500 mx-auto mb-4"/>
+                    <h1 className="text-2xl font-bold">Journal Locked</h1>
+                    <p className="text-slate-500 dark:text-slate-400 mt-2 mb-4">Please enter your PIN to continue.</p>
+                    <input 
+                        type="password"
+                        value={pin}
+                        onChange={(e) => setPin(e.target.value)}
+                        maxLength="4"
+                        className="w-full text-center tracking-[1rem] px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    />
+                    {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
+                    <button onClick={handleUnlock} className="mt-4 w-full bg-cyan-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-cyan-600">
+                        Unlock
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    return <JournalContent />;
+}
+
+function JournalContent() {
     const { user } = useAuth();
     const [entries, setEntries] = useState([]);
     const [newEntry, setNewEntry] = useState('');
@@ -544,12 +730,10 @@ function JournalScreen() {
 
     useEffect(() => {
         if (user) {
-            const q = query(collection(db, `users/${user.uid}/journal_entries`), orderBy('timestamp', 'desc'));
+            const q = query(collection(db, `users/${user.uid}/journal_entries`));
             const unsubscribe = onSnapshot(q, (snapshot) => {
-                const journalEntries = [];
-                snapshot.forEach(doc => {
-                    journalEntries.push({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() });
-                });
+                const journalEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() }));
+                journalEntries.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
                 setEntries(journalEntries);
             });
             return () => unsubscribe();
@@ -557,11 +741,10 @@ function JournalScreen() {
     }, [user]);
 
     const handleSaveEntry = async () => {
-        if (newEntry.trim() === '') return;
+        if (newEntry.trim() === '' || !user) return;
         setIsSaving(true);
         await addDoc(collection(db, `users/${user.uid}/journal_entries`), {
-            content: newEntry,
-            timestamp: serverTimestamp(),
+            content: newEntry, timestamp: serverTimestamp(),
         });
         setNewEntry('');
         setIsSaving(false);
@@ -571,40 +754,13 @@ function JournalScreen() {
         setAnalyzingEntry(entry);
         setIsAnalysisLoading(true);
         setAnalysisResult(null);
-        // FIX: Use environment variable for API key.
-        const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
-        if (!apiKey) {
-            console.error("Gemini API key not found.");
-            setAnalysisResult({ tone: "Could not analyze entry.", themes: [], reflection: "API key is missing. Please configure it in your .env.local file." });
-            setIsAnalysisLoading(false);
-            return;
-        }
 
-        const prompt = `You are a reflective assistant in a wellness app. Analyze the following journal entry from a user. Do not give medical advice or a diagnosis. Your response must be a JSON object with three keys: "tone" (a gentle summary of the emotional tone, e.g., "It sounds like you're feeling..."), "themes" (an array of 2-3 key topics mentioned, e.g., ["Work Stress", "Future Plans"]), and "reflection" (one thoughtful, open-ended question to encourage the user's self-reflection, e.g., "What is one small step you could take towards...?"). Here is the user's entry: "${entry.content}"`;
+        const prompt = `You are a reflective assistant in a wellness app. Analyze the following journal entry. Do not give medical advice. Your response must be a JSON object with three keys: "tone", "themes" (array of 2-3 topics), and "reflection" (one open-ended question). Entry: "${entry.content}"`;
+        
         try {
-            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (!response.ok) throw new Error(`API error: ${response.status}`);
-
-            const result = await response.json();
-            if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
-                const text = result.candidates[0].content.parts[0].text;
-                const cleanedText = text.replace(/```json|```/g, '').trim();
-                try {
-                    setAnalysisResult(JSON.parse(cleanedText));
-                } catch {
-                    throw new Error("Malformed JSON response from AI.");
-                }
-            } else {
-                throw new Error("Invalid response structure from API");
-            }
+            const result = await callGeminiAPI(prompt, true);
+            setAnalysisResult(result);
         } catch (error) {
-            console.error("Error analyzing journal entry:", error);
             setAnalysisResult({ tone: "Could not analyze entry.", themes: [], reflection: "Please try again later." });
         } finally {
             setIsAnalysisLoading(false);
@@ -635,12 +791,12 @@ function JournalScreen() {
                 <div className="space-y-4">
                     {entries.length > 0 ? entries.map(entry => (
                         <div key={entry.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg shadow-sm">
-                            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{entry.timestamp?.toLocaleString()}</p>
+                            <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{entry.timestamp?.toLocaleString() || 'Just now'}</p>
                             <p className="whitespace-pre-wrap">{entry.content}</p>
                             <div className="text-right mt-3">
                                 <button onClick={() => handleAnalyze(entry)} className="inline-flex items-center gap-2 text-sm font-medium text-cyan-600 hover:text-cyan-800 dark:text-cyan-400 dark:hover:text-cyan-200">
                                     <Sparkles size={16} />
-                                    Get Insights ✨
+                                    AI Reflection ✨
                                 </button>
                             </div>
                         </div>
@@ -662,20 +818,42 @@ function JournalScreen() {
 }
 
 function ProfileScreen() {
-    const { userData } = useAuth();
-    const [name, setName] = useState(userData?.name || '');
-    const [age, setAge] = useState(userData?.age || '');
-    const [occupation, setOccupation] = useState(userData?.occupation || '');
+    const { user, userData } = useAuth();
+    const [name, setName] = useState('');
+    const [age, setAge] = useState('');
+    const [occupation, setOccupation] = useState('');
+    const [journalPin, setJournalPin] = useState('');
+    const [isJournalProtected, setIsJournalProtected] = useState(false);
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
 
+    useEffect(() => {
+        if(userData) {
+            setName(userData.name || '');
+            setAge(userData.age || '');
+            setOccupation(userData.occupation || '');
+            setIsJournalProtected(!!userData.journalPin);
+        }
+    }, [userData]);
+
     const handleUpdate = async (e) => {
         e.preventDefault();
+        if(!user) return;
+        if (isJournalProtected && (journalPin.length !== 4 || !/^\d{4}$/.test(journalPin))) {
+            setMessage('PIN must be 4 digits.');
+            return;
+        }
         setLoading(true);
         setMessage('');
         try {
-            const userRef = doc(db, 'users', userData.id);
-            await updateDoc(userRef, { name, age, occupation });
+            const userRef = doc(db, 'users', user.uid);
+            const dataToUpdate = { name, age, occupation };
+            if (isJournalProtected) {
+                dataToUpdate.journalPin = journalPin;
+            } else {
+                dataToUpdate.journalPin = null; // Remove pin if protection is disabled
+            }
+            await updateDoc(userRef, dataToUpdate);
             setMessage('Profile updated successfully!');
         } catch (error) {
             setMessage('Error updating profile.');
@@ -687,44 +865,70 @@ function ProfileScreen() {
 
     return (
         <div className="max-w-2xl mx-auto">
-            <h1 className="text-3xl font-bold mb-6">Your Profile</h1>
+            <h1 className="text-3xl font-bold mb-6">Your Profile & Settings</h1>
             <div className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-md">
                 <div className="flex items-center space-x-4 mb-8">
-                    <img src={userData?.profile_pic} alt="Profile" className="w-20 h-20 rounded-full bg-slate-200" />
+                    <img src={userData?.profile_pic} alt="Profile" className="w-20 h-20 rounded-full bg-slate-200" onError={(e) => { e.target.onerror = null; e.target.src=`https://api.dicebear.com/7.x/initials/svg?seed=${userData?.name || 'User'}`; }} />
                     <div>
                         <h2 className="text-2xl font-bold">{userData?.name}</h2>
                         <p className="text-slate-500 dark:text-slate-400">{userData?.email}</p>
                     </div>
                 </div>
-                <form onSubmit={handleUpdate} className="space-y-4">
+                <form onSubmit={handleUpdate} className="space-y-6">
                     <div>
-                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Name</label>
-                        <input type="text" value={name} onChange={e => setName(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                        <h3 className="text-lg font-semibold border-b pb-2 mb-4">User Information</h3>
+                        <div className="space-y-4">
+                             <div>
+                                <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Name</label>
+                                <input type="text" value={name} onChange={e => setName(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Age</label>
+                                <input type="number" value={age} onChange={e => setAge(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Occupation</label>
+                                <input type="text" value={occupation} onChange={e => setOccupation(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                            </div>
+                        </div>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Age</label>
-                        <input type="number" value={age} onChange={e => setAge(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Occupation</label>
-                        <input type="text" value={occupation} onChange={e => setOccupation(e.target.value)} className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                     <div>
+                        <h3 className="text-lg font-semibold border-b pb-2 mb-4">Security</h3>
+                        <div className="flex items-center justify-between bg-slate-100 dark:bg-slate-700 p-3 rounded-lg">
+                            <div className="flex items-center gap-2">
+                               {isJournalProtected ? <Shield size={20} className="text-green-500"/> : <ShieldOff size={20} className="text-red-500"/>}
+                               <div>
+                                    <label htmlFor="journal-protection" className="font-medium text-slate-700 dark:text-slate-200">Journal PIN Protection</label>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Protect your journal with a 4-digit PIN.</p>
+                               </div>
+                            </div>
+                            <label htmlFor="journal-protection-toggle" className="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="journal-protection-toggle" className="sr-only peer" checked={isJournalProtected} onChange={() => setIsJournalProtected(!isJournalProtected)} />
+                                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-300 dark:peer-focus:ring-cyan-800 rounded-full peer dark:bg-slate-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-500 peer-checked:bg-cyan-600"></div>
+                            </label>
+                        </div>
+                        {isJournalProtected && (
+                             <div className="mt-3">
+                                <label className="block text-sm font-medium text-slate-600 dark:text-slate-300">Set 4-Digit PIN</label>
+                                <input type="password" value={journalPin} onChange={e => setJournalPin(e.target.value)} maxLength="4" placeholder="****" className="mt-1 w-full px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+                            </div>
+                        )}
                     </div>
                     <div className="pt-2">
                         <button type="submit" disabled={loading} className="w-full bg-cyan-500 text-white font-semibold py-2 px-4 rounded-lg shadow-lg hover:bg-cyan-600 transition-all disabled:bg-cyan-300">
-                            {loading ? 'Saving...' : 'Update Profile'}
+                            {loading ? 'Saving...' : 'Update Profile & Settings'}
                         </button>
                     </div>
-                    {message && <p className="text-green-500 text-sm text-center mt-2">{message}</p>}
+                    {message && <p className={`${message.includes('Error') ? 'text-red-500' : 'text-green-500'} text-sm text-center mt-2`}>{message}</p>}
                 </form>
             </div>
         </div>
     );
 }
 
+// --- Reusable Components ---
 
-// --- Components ---
-
-function Sidebar({ currentPage, setCurrentPage, toggleTheme, theme }) {
+function Sidebar({ currentPage, setCurrentPage, toggleTheme, theme, isExpanded, setIsExpanded }) {
     const navItems = [
         { id: 'dashboard', icon: Home, label: 'Dashboard' },
         { id: 'tracker', icon: Feather, label: 'Log Mood' },
@@ -733,30 +937,35 @@ function Sidebar({ currentPage, setCurrentPage, toggleTheme, theme }) {
     ];
 
     return (
-        <nav className="w-20 hover:w-64 transition-all duration-300 ease-in-out bg-white dark:bg-slate-800 shadow-lg flex flex-col justify-between group">
+        <nav className={`transition-all duration-300 ease-in-out bg-white dark:bg-slate-800 shadow-lg flex flex-col justify-between relative ${isExpanded ? 'w-64' : 'w-20'}`}>
             <div>
-                <div className="flex items-center justify-center h-20 border-b dark:border-slate-700">
-                    <Heart className="w-8 h-8 text-cyan-500" />
+                <div className={`flex items-center h-20 border-b dark:border-slate-700 ${isExpanded ? 'justify-start px-6' : 'justify-center'}`}>
+                    <Logo className="w-8 h-8 flex-shrink-0" />
+                    <span className={`ml-3 font-bold text-xl whitespace-nowrap transition-opacity duration-200 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>EaseHaven</span>
                 </div>
                 <ul>
                     {navItems.map(item => (
                         <li key={item.id} className="relative">
                             <button onClick={() => setCurrentPage(item.id)} className={`flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700 ${currentPage === item.id ? 'bg-cyan-100 dark:bg-cyan-900 text-cyan-600 dark:text-cyan-300' : ''}`}>
-                                <item.icon className="w-6 h-6" />
-                                <span className="ml-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">{item.label}</span>
+                                <item.icon className="w-6 h-6 flex-shrink-0" />
+                                <span className={`ml-6 whitespace-nowrap transition-opacity duration-200 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>{item.label}</span>
                             </button>
                         </li>
                     ))}
                 </ul>
             </div>
+            
             <div className="p-4 border-t dark:border-slate-700">
-                <button onClick={toggleTheme} className="flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700">
-                    {theme === 'light' ? <Moon className="w-6 h-6" /> : <Sun className="w-6 h-6" />}
-                    <span className="ml-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">Theme</span>
+                 <button onClick={() => setIsExpanded(!isExpanded)} className="absolute -right-4 top-20 bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 p-1 rounded-full border dark:border-slate-600 shadow-md hover:bg-slate-100 dark:hover:bg-slate-600">
+                    {isExpanded ? <ChevronsLeft size={18} /> : <ChevronsRight size={18} />}
                 </button>
-                <button onClick={() => signOut(auth)} className="flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700">
-                    <LogOut className="w-6 h-6" />
-                    <span className="ml-6 opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">Logout</span>
+                <button onClick={toggleTheme} className="flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700 rounded-lg">
+                    {theme === 'light' ? <Moon className="w-6 h-6 flex-shrink-0" /> : <Sun className="w-6 h-6 flex-shrink-0" />}
+                    <span className={`ml-6 whitespace-nowrap transition-opacity duration-200 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+                </button>
+                <button onClick={() => signOut(auth)} className="flex items-center w-full h-14 px-6 text-slate-600 dark:text-slate-300 hover:bg-cyan-50 dark:hover:bg-slate-700 rounded-lg">
+                    <LogOut className="w-6 h-6 flex-shrink-0" />
+                    <span className={`ml-6 whitespace-nowrap transition-opacity duration-200 ${isExpanded ? 'opacity-100' : 'opacity-0'}`}>Logout</span>
                 </button>
             </div>
         </nav>
@@ -769,7 +978,7 @@ function AnalysisModal({ isOpen, onClose, isLoading, result }) {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 animate-fade-in">
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 w-full max-w-lg m-4">
-                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2"><Sparkles className="text-yellow-400"/> AI-Powered Insights</h2>
+                <h2 className="text-2xl font-bold mb-4 flex items-center gap-2"><Sparkles className="text-yellow-400"/> AI Reflection</h2>
                 {isLoading ? (
                     <div className="flex flex-col items-center justify-center h-48">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
@@ -808,7 +1017,7 @@ function AnalysisModal({ isOpen, onClose, isLoading, result }) {
 
 function ChatAssistant() {
     const [isOpen, setIsOpen] = useState(false);
-    const [messages, setMessages] = useState([{ text: "Hello! I'm your AI Helper. How can I support you today?", sender: 'bot' }]);
+    const [messages, setMessages] = useState([{ text: "Hello! I'm your EaseHaven AI Support. How can I support you today?", sender: 'bot' }]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef(null);
@@ -821,35 +1030,16 @@ function ChatAssistant() {
         if (input.trim() === '') return;
         const userMessage = { text: input, sender: 'user' };
         setMessages(prev => [...prev, userMessage]);
+        const currentInput = input;
         setInput('');
         setIsLoading(true);
 
+        const prompt = `You are a kind, empathetic, and motivational AI assistant for a mental wellness app called EaseHaven. Your goal is to provide supportive, helpful, and safe conversations. You are not a licensed therapist. Keep responses concise, positive, and encouraging. User's message: "${currentInput}"`;
+        
         try {
-            // FIX: Use environment variable for API key.
-            const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
-            if (!apiKey) {
-                throw new Error("API Key not found");
-            }
-
-            const prompt = `You are a kind, empathetic, and motivational AI assistant for a mental wellness app called EaseHaven. Your goal is to provide supportive, helpful, and safe conversations. You are not a licensed therapist. Keep responses concise, positive, and encouraging. User's message: "${input}"`;
-            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-            const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            if (!response.ok) throw new Error(`API error: ${response.status}`);
-            
-            const result = await response.json();
-            if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
-                const botResponse = result.candidates[0].content.parts[0].text;
-                setMessages(prev => [...prev, { text: botResponse, sender: 'bot' }]);
-            } else {
-                throw new Error("Invalid response structure from API");
-            }
+            const botResponse = await callGeminiAPI(prompt);
+            setMessages(prev => [...prev, { text: botResponse, sender: 'bot' }]);
         } catch (error) {
-            console.error("Chatbot API error:", error);
             setMessages(prev => [...prev, { text: "I'm having a little trouble connecting. Please try again.", sender: 'bot' }]);
         } finally {
             setIsLoading(false);
@@ -864,7 +1054,7 @@ function ChatAssistant() {
             {isOpen && (
                 <div className="fixed bottom-24 right-6 w-full max-w-sm h-[60vh] bg-white dark:bg-slate-800 rounded-2xl shadow-2xl flex flex-col animate-fade-in-up z-50">
                     <div className="p-4 border-b dark:border-slate-700 flex justify-between items-center">
-                        <h2 className="font-bold text-lg">AI Helper</h2>
+                        <h2 className="font-bold text-lg">EaseHaven AI Support</h2>
                         <button onClick={() => setIsOpen(false)} className="text-slate-500 hover:text-slate-800 dark:hover:text-white text-2xl">&times;</button>
                     </div>
                     <div className="flex-1 p-4 overflow-y-auto space-y-4">
@@ -876,7 +1066,7 @@ function ChatAssistant() {
                                 </div>
                             </div>
                         ))}
-                         {isLoading && <div className="flex justify-start"><p className="text-sm text-slate-400">AI is typing...</p></div>}
+                         {isLoading && <div className="flex justify-start"><div className="max-w-xs px-4 py-2 rounded-2xl bg-slate-200 dark:bg-slate-700 rounded-bl-none"><p className="text-sm text-slate-400">AI is typing...</p></div></div>}
                         <div ref={messagesEndRef} />
                     </div>
                     <div className="p-4 border-t dark:border-slate-700">
