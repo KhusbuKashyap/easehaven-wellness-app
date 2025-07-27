@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail, sendEmailVerification } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, getDocs } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Bot, Feather, Home, LogOut, MessageSquare, Sun, Moon, User, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb, Shield, ShieldOff, ChevronsLeft, ChevronsRight, AlertTriangle, MailCheck } from 'lucide-react';
+import { Bot, Feather, Home, LogOut, MessageSquare, Sun, Moon, User, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb, Shield, ShieldOff, ChevronsLeft, ChevronsRight, AlertTriangle, MailCheck, Users, ThumbsUp, ThumbsDown, MessageCircle, MoreVertical, Edit, Trash2, BarChart as BarChartIcon } from 'lucide-react';
 
 // --- Firebase Configuration & Initialization ---
-// TODO: Replace this with your own Firebase project configuration.
-// You can get this from the Firebase console for your project.
+// This configuration now works for both local development and the preview environment.
+// For local, it uses environment variables from a .env file.
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -16,7 +16,7 @@ const firebaseConfig = {
   messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
-const appId = 'easehaven-web-app'; 
+
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -52,6 +52,33 @@ const EmailVerificationNotice = ({ user, onResend }) => {
     );
 };
 
+const ConfirmModal = ({ isOpen, onClose, onConfirm, title, children }) => {
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 animate-fade-in">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl p-8 w-full max-w-md m-4">
+                <h2 className="text-xl font-bold mb-4">{title}</h2>
+                <div className="text-slate-600 dark:text-slate-300 mb-6">
+                    {children}
+                </div>
+                <div className="flex justify-end gap-4">
+                    <button 
+                        onClick={onClose} 
+                        className="py-2 px-5 rounded-lg bg-slate-200 dark:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold hover:bg-slate-300 dark:hover:bg-slate-500">
+                        Cancel
+                    </button>
+                    <button 
+                        onClick={onConfirm} 
+                        className="py-2 px-5 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600">
+                        Confirm Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 
 // --- Authentication Context ---
 const AuthContext = createContext();
@@ -65,12 +92,10 @@ const AuthProvider = ({ children }) => {
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
             if (firebaseUser) {
-                // Reload the user to get the latest emailVerified status
                 await firebaseUser.reload();
                 
-                // If the user has signed up but not verified, keep them on the auth screen
                 if (!firebaseUser.emailVerified && !firebaseUser.providerData.some(p => p.providerId === 'google.com')) {
-                    setUser(firebaseUser); // Set user to allow resend verification
+                    setUser(firebaseUser);
                     setUserData(null);
                     setLoading(false);
                     return;
@@ -122,7 +147,7 @@ const AuthProvider = ({ children }) => {
                 setLoading(false);
             }
         });
-
+        
         return () => unsubscribe();
     }, []);
 
@@ -147,16 +172,25 @@ function MainApp() {
     const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
     useEffect(() => {
-        const storedTheme = localStorage.getItem('easehaven-theme');
-        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const initialTheme = storedTheme || (systemPrefersDark ? 'dark' : 'light');
-        setTheme(initialTheme);
+        try {
+            const storedTheme = localStorage.getItem('easehaven-theme');
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const initialTheme = storedTheme || (systemPrefersDark ? 'dark' : 'light');
+            setTheme(initialTheme);
+        } catch (error) {
+            console.warn("Could not access localStorage for theme:", error);
+            setTheme('light');
+        }
     }, []);
 
     useEffect(() => {
         const root = document.documentElement;
         root.classList.toggle('dark', theme === 'dark');
-        localStorage.setItem('easehaven-theme', theme);
+        try {
+            localStorage.setItem('easehaven-theme', theme);
+        } catch (error) {
+            console.warn("Could not save theme to localStorage:", error);
+        }
     }, [theme]);
 
     const toggleTheme = () => setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
@@ -168,8 +202,8 @@ function MainApp() {
             </div>
         );
     }
-
-    if (!user || !user.emailVerified) {
+    
+    if (!user || (!user.emailVerified && !user.providerData.some(p => p.providerId === 'google.com'))) {
         return <AuthScreen />;
     }
     
@@ -178,6 +212,8 @@ function MainApp() {
             case 'dashboard': return <DashboardScreen onNavigate={setCurrentPage} />;
             case 'tracker': return <MoodTrackerScreen onLogSuccess={() => setCurrentPage('dashboard')} />;
             case 'journal': return <JournalScreen />;
+            case 'analytics': return <AnalyticsScreen />;
+            case 'community': return <CommunityScreen />;
             case 'profile': return <ProfileScreen />;
             default: return <DashboardScreen onNavigate={setCurrentPage} />;
         }
@@ -375,15 +411,12 @@ function AuthScreen() {
 }
 
 async function callGeminiAPI(prompt, isJson = false) {
-    // TODO: Add your Gemini API key to a .env.local file in your project root
-    // Example: REACT_APP_GEMINI_API_KEY=YOUR_API_KEY
-    const apiKey = process.env.REACT_APP_GEMINI_API_KEY;
-    if (!apiKey) {
-        console.error("Gemini API key not found. Please set it in your .env.local file.");
-        throw new Error("API key not configured.");
-    }
+    // In the preview environment, the API key is handled automatically.
+    const apiKey = ""; 
+
+    const model = "gemini-2.0-flash";
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
     const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
     if (isJson) {
         payload.generationConfig = { responseMimeType: "application/json" };
@@ -395,10 +428,14 @@ async function callGeminiAPI(prompt, isJson = false) {
         });
         if (!response.ok) throw new Error(`API call failed with status: ${response.status}`);
         const result = await response.json();
+        
         if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
             const text = result.candidates[0].content.parts[0].text;
-            return isJson ? JSON.parse(text.replace(/```json|```/g, '').trim()) : text;
+            // Clean up potential markdown formatting from the response
+            const cleanedText = text.replace(/```json|```/g, '').trim();
+            return isJson ? JSON.parse(cleanedText) : cleanedText;
         } else {
+            console.error("Invalid response structure from API:", result);
             throw new Error("Invalid response structure from API");
         }
     } catch (error) {
@@ -409,7 +446,6 @@ async function callGeminiAPI(prompt, isJson = false) {
 
 function DashboardScreen({ onNavigate }) {
     const { user, userData } = useAuth();
-    const [moodLogs, setMoodLogs] = useState([]);
     const [streaks, setStreaks] = useState({ current_streak: 0, longest_streak: 0 });
     const [thoughtOfTheDay, setThoughtOfTheDay] = useState('');
     const [thoughtLoading, setThoughtLoading] = useState(true);
@@ -433,21 +469,12 @@ function DashboardScreen({ onNavigate }) {
 
     useEffect(() => {
         if (userData && user) {
-            const moodEntriesPath = `users/${user.uid}/mood_entries`;
-            const q = query(collection(db, moodEntriesPath));
-            const unsubscribeMoods = onSnapshot(q, (snapshot) => {
-                const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() }));
-                logs.sort((a, b) => a.timestamp - b.timestamp);
-                setMoodLogs(logs);
-            });
-            
             const streakRef = doc(db, `users/${user.uid}/streaks`, 'data');
             const unsubStreaks = onSnapshot(streakRef, (doc) => {
                 setStreaks(doc.exists() ? doc.data() : { current_streak: 0, longest_streak: 0 });
             });
 
             return () => {
-                unsubscribeMoods();
                 unsubStreaks();
             };
         }
@@ -460,19 +487,6 @@ function DashboardScreen({ onNavigate }) {
                 .catch(err => setVerificationMessage(`Error: ${err.message}`));
         }
     };
-
-    const chartData = moodLogs.slice(-7).map(log => ({
-        date: log.timestamp ? log.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A',
-        stress: log.stress_level,
-    }));
-    
-    const moodDistribution = moodLogs.reduce((acc, log) => {
-        acc[log.mood] = (acc[log.mood] || 0) + 1;
-        return acc;
-    }, {});
-
-    const pieData = Object.entries(moodDistribution).map(([name, value]) => ({ name, value }));
-    const MOOD_COLORS = { 'Happy': '#34D399', 'Calm': '#60A5FA', 'Okay': '#A78BFA', 'Sad': '#F472B6', 'Anxious': '#FBBF24', 'Angry': '#F87171' };
 
     return (
         <div className="animate-fade-in space-y-6">
@@ -524,6 +538,47 @@ function DashboardScreen({ onNavigate }) {
                     <Sparkles className="w-10 h-10 text-pink-400" />
                 </div>
             </div>
+        </div>
+    );
+}
+
+function AnalyticsScreen() {
+    const { user } = useAuth();
+    const [moodLogs, setMoodLogs] = useState([]);
+
+    useEffect(() => {
+        if (user) {
+            const moodEntriesPath = `users/${user.uid}/mood_entries`;
+            const q = query(collection(db, moodEntriesPath));
+            const unsubscribeMoods = onSnapshot(q, (snapshot) => {
+                const logs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() }));
+                logs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+                setMoodLogs(logs);
+            });
+
+            return () => {
+                unsubscribeMoods();
+            };
+        }
+    }, [user]);
+
+    const chartData = moodLogs.slice(0, 7).reverse().map(log => ({
+        date: log.timestamp ? log.timestamp.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A',
+        stress: log.stress_level,
+    }));
+    
+    const moodDistribution = moodLogs.reduce((acc, log) => {
+        acc[log.mood] = (acc[log.mood] || 0) + 1;
+        return acc;
+    }, {});
+
+    const pieData = Object.entries(moodDistribution).map(([name, value]) => ({ name, value }));
+    const MOOD_COLORS = { 'Happy': '#34D399', 'Calm': '#60A5FA', 'Okay': '#A78BFA', 'Sad': '#F472B6', 'Anxious': '#FBBF24', 'Angry': '#F87171' };
+
+    return (
+        <div className="animate-fade-in space-y-6">
+            <h1 className="text-3xl font-bold">Weekly Analytics</h1>
+            <p className="text-slate-500 dark:text-slate-400">Here's a look at your mood and stress levels over the past week.</p>
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                 <div className="lg:col-span-3 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
                     <h2 className="text-xl font-bold mb-4">7-Day Stress Trend</h2>
@@ -544,7 +599,7 @@ function DashboardScreen({ onNavigate }) {
                             <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
                                 {pieData.map((entry, index) => <Cell key={`cell-${index}`} fill={MOOD_COLORS[entry.name] || '#cccccc'} />)}
                             </Pie>
-                            <Tooltip />
+                            <Tooltip contentStyle={{ backgroundColor: 'rgba(30, 41, 59, 0.8)', borderColor: 'rgba(128, 128, 128, 0.5)', borderRadius: '0.5rem' }}/>
                             <Legend />
                         </PieChart>
                     </ResponsiveContainer>
@@ -840,7 +895,7 @@ function ProfileScreen() {
         e.preventDefault();
         if(!user) return;
         if (isJournalProtected && (journalPin.length !== 4 || !/^\d{4}$/.test(journalPin))) {
-            setMessage('PIN must be 4 digits.');
+            setMessage('Error: PIN must be 4 digits.');
             return;
         }
         setLoading(true);
@@ -926,6 +981,428 @@ function ProfileScreen() {
     );
 }
 
+// --- Community Feature Components ---
+
+function CommunityScreen() {
+    const { user, userData } = useAuth();
+    const [posts, setPosts] = useState([]);
+    const [newPostContent, setNewPostContent] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        const postsCollectionRef = collection(db, 'community_posts');
+        const q = query(postsCollectionRef);
+        
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const fetchedPosts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() }));
+            fetchedPosts.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            setPosts(fetchedPosts);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    const handleCreatePost = async (e) => {
+        e.preventDefault();
+        if (newPostContent.trim() === '' || !user || !userData) return;
+
+        setIsSubmitting(true);
+        try {
+            await addDoc(collection(db, 'community_posts'), {
+                content: newPostContent,
+                authorId: user.uid,
+                authorName: userData.name,
+                authorPic: userData.profile_pic,
+                timestamp: serverTimestamp(),
+                agrees: [],
+                disagrees: [],
+                commentCount: 0,
+            });
+            setNewPostContent('');
+        } catch (error) {
+            console.error("Error creating post: ", error);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="animate-fade-in max-w-4xl mx-auto">
+            <h1 className="text-3xl font-bold">Community Blog</h1>
+            <p className="text-slate-500 dark:text-slate-400 mt-1">Share your thoughts and connect with others.</p>
+
+            <div className="my-8 bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                <h2 className="text-xl font-bold mb-4">Create a New Post</h2>
+                <form onSubmit={handleCreatePost}>
+                    <textarea 
+                        value={newPostContent}
+                        onChange={(e) => setNewPostContent(e.target.value)}
+                        placeholder="What's on your mind? Share something with the community..."
+                        className="w-full h-28 p-3 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        disabled={isSubmitting}
+                    />
+                    <div className="text-right mt-3">
+                        <button type="submit" disabled={isSubmitting || !newPostContent.trim()} className="py-2 px-6 rounded-lg bg-cyan-500 text-white font-semibold hover:bg-cyan-600 disabled:bg-cyan-300 transition-colors">
+                            {isSubmitting ? 'Posting...' : 'Post'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div className="space-y-6">
+                {posts.map(post => (
+                    <BlogPost key={post.id} post={post} />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function BlogPost({ post }) {
+    const { user } = useAuth();
+    const [showComments, setShowComments] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedContent, setEditedContent] = useState(post.content);
+    const [showMenu, setShowMenu] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    
+    const isAuthor = user && user.uid === post.authorId;
+
+    const handleReaction = async (reactionType) => {
+        if (!user) return;
+        const postRef = doc(db, 'community_posts', post.id);
+
+        await runTransaction(db, async (transaction) => {
+            const postDoc = await transaction.get(postRef);
+            if (!postDoc.exists()) {
+                throw "Document does not exist!";
+            }
+
+            let agrees = postDoc.data().agrees || [];
+            let disagrees = postDoc.data().disagrees || [];
+            const userId = user.uid;
+
+            const currentReactionList = reactionType === 'agrees' ? agrees : disagrees;
+            const otherReactionList = reactionType === 'agrees' ? disagrees : agrees;
+            const otherReactionType = reactionType === 'agrees' ? 'disagrees' : 'agrees';
+
+            let newCurrentReactions = [...currentReactionList];
+            let newOtherReactions = [...otherReactionList];
+
+            if (currentReactionList.includes(userId)) {
+                newCurrentReactions = newCurrentReactions.filter(id => id !== userId);
+            } else {
+                newCurrentReactions.push(userId);
+                newOtherReactions = newOtherReactions.filter(id => id !== userId);
+            }
+            
+            const updateData = {};
+            updateData[reactionType] = newCurrentReactions;
+            updateData[otherReactionType] = newOtherReactions;
+
+            transaction.update(postRef, updateData);
+        });
+    };
+    
+    const confirmDelete = async () => {
+        try {
+            const postRef = doc(db, 'community_posts', post.id);
+            const commentsQuery = query(collection(postRef, 'comments'));
+            const commentsSnapshot = await getDocs(commentsQuery);
+            
+            const deletePromises = [];
+            commentsSnapshot.forEach((commentDoc) => {
+                deletePromises.push(deleteDoc(commentDoc.ref));
+            });
+            await Promise.all(deletePromises);
+            
+            await deleteDoc(postRef);
+        } catch (error) {
+            console.error("Error deleting post:", error);
+        }
+        setIsDeleteModalOpen(false);
+    };
+
+    const handleUpdate = async () => {
+        if (editedContent.trim() === '') return;
+        try {
+            const postRef = doc(db, 'community_posts', post.id);
+            await updateDoc(postRef, { content: editedContent });
+            setIsEditing(false);
+        } catch (error) {
+            console.error("Error updating post:", error);
+        }
+    };
+
+    const hasAgreed = post.agrees?.includes(user?.uid);
+    const hasDisagreed = post.disagrees?.includes(user?.uid);
+
+    return (
+        <>
+            <ConfirmModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Post"
+            >
+                <p>Are you sure you want to delete this post and all its comments? This action cannot be undone.</p>
+            </ConfirmModal>
+
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                <div className="flex items-start gap-4">
+                    <img src={post.authorPic} alt={post.authorName} className="w-12 h-12 rounded-full bg-slate-200" onError={(e) => { e.target.onerror = null; e.target.src=`https://api.dicebear.com/7.x/initials/svg?seed=${post.authorName || 'User'}`; }} />
+                    <div className="flex-1">
+                        <p className="font-bold text-slate-800 dark:text-slate-100">{post.authorName}</p>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">{post.timestamp?.toLocaleString() || 'Just now'}</p>
+                    </div>
+                    {isAuthor && !isEditing && (
+                        <div 
+                            className="relative"
+                            onBlur={(e) => {
+                                if (!e.currentTarget.contains(e.relatedTarget)) {
+                                    setShowMenu(false);
+                                }
+                            }}
+                        >
+                            <button onClick={() => setShowMenu(!showMenu)} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700">
+                                <MoreVertical size={20} />
+                            </button>
+                            {showMenu && (
+                                <div className="absolute right-0 mt-2 w-32 bg-white dark:bg-slate-800 rounded-md shadow-lg border dark:border-slate-700 z-10">
+                                    <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2">
+                                        <Edit size={14}/> Edit
+                                    </button>
+                                    <button onClick={() => { setIsDeleteModalOpen(true); setShowMenu(false); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2">
+                                        <Trash2 size={14}/> Delete
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+                
+                {isEditing ? (
+                    <div className="mt-4">
+                        <textarea 
+                            value={editedContent}
+                            onChange={(e) => setEditedContent(e.target.value)}
+                            className="w-full h-28 p-3 bg-slate-100 dark:bg-slate-700 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+                        <div className="flex justify-end gap-2 mt-2">
+                            <button onClick={() => setIsEditing(false)} className="py-1 px-4 rounded-md bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500 font-semibold text-sm">Cancel</button>
+                            <button onClick={handleUpdate} className="py-1 px-4 rounded-md bg-cyan-500 hover:bg-cyan-600 text-white font-semibold text-sm">Save</button>
+                        </div>
+                    </div>
+                ) : (
+                    <p className="my-4 whitespace-pre-wrap text-slate-700 dark:text-slate-300">{post.content}</p>
+                )}
+
+                {!isEditing && (
+                    <>
+                        <div className="flex items-center gap-6 border-t dark:border-slate-700 pt-3">
+                            <button onClick={() => handleReaction('agrees')} className={`flex items-center gap-2 text-sm font-medium transition-colors ${hasAgreed ? 'text-green-500' : 'text-slate-500 hover:text-green-500'}`}>
+                                <ThumbsUp size={18} />
+                                <span>{post.agrees?.length || 0} Agree</span>
+                            </button>
+                            <button onClick={() => handleReaction('disagrees')} className={`flex items-center gap-2 text-sm font-medium transition-colors ${hasDisagreed ? 'text-red-500' : 'text-slate-500 hover:text-red-500'}`}>
+                                <ThumbsDown size={18} />
+                                <span>{post.disagrees?.length || 0} Disagree</span>
+                            </button>
+                            <button onClick={() => setShowComments(!showComments)} className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-cyan-500 transition-colors">
+                                <MessageCircle size={18} />
+                                <span>{post.commentCount || 0} Comments</span>
+                            </button>
+                        </div>
+                        {showComments && <CommentSection postId={post.id} />}
+                    </>
+                )}
+            </div>
+        </>
+    );
+}
+
+function Comment({ comment, postId }) {
+    const { user } = useAuth();
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedContent, setEditedContent] = useState(comment.content);
+    const [showMenu, setShowMenu] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
+    const isAuthor = user && user.uid === comment.authorId;
+
+    const handleUpdate = async () => {
+        if (editedContent.trim() === '') return;
+        try {
+            const commentRef = doc(db, 'community_posts', postId, 'comments', comment.id);
+            await updateDoc(commentRef, { content: editedContent });
+            setIsEditing(false);
+        } catch (error) {
+            console.error("Error updating comment:", error);
+        }
+    };
+
+    const confirmDelete = async () => {
+        try {
+            const postRef = doc(db, 'community_posts', postId);
+            const commentRef = doc(db, 'community_posts', postId, 'comments', comment.id);
+
+            await deleteDoc(commentRef);
+
+            await runTransaction(db, async (transaction) => {
+                const postDoc = await transaction.get(postRef);
+                if (postDoc.exists()) {
+                    const newCommentCount = Math.max(0, (postDoc.data().commentCount || 0) - 1);
+                    transaction.update(postRef, { commentCount: newCommentCount });
+                }
+            });
+        } catch (error) {
+            console.error("Error deleting comment:", error);
+        }
+        setIsDeleteModalOpen(false);
+    };
+
+    return (
+        <>
+            <ConfirmModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Comment"
+            >
+                <p>Are you sure you want to delete this comment? This action cannot be undone.</p>
+            </ConfirmModal>
+
+            <div className="flex items-start gap-3">
+                <img src={comment.authorPic} alt={comment.authorName} className="w-8 h-8 rounded-full bg-slate-200" onError={(e) => { e.target.onerror = null; e.target.src=`https://api.dicebear.com/7.x/initials/svg?seed=${comment.authorName || 'User'}`; }}/>
+                <div className="bg-slate-100 dark:bg-slate-700 p-3 rounded-lg flex-1">
+                    <div className="flex justify-between items-start">
+                        <div>
+                            <p className="font-semibold text-sm text-slate-800 dark:text-slate-100">{comment.authorName}</p>
+                            <p className="text-xs text-slate-400 dark:text-slate-500">{comment.timestamp?.toLocaleDateString() || 'Just now'}</p>
+                        </div>
+                        {isAuthor && !isEditing && (
+                            <div 
+                                className="relative"
+                                onBlur={(e) => {
+                                    if (!e.currentTarget.contains(e.relatedTarget)) {
+                                        setShowMenu(false);
+                                    }
+                                }}
+                            >
+                                <button onClick={() => setShowMenu(!showMenu)} className="p-1 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600">
+                                    <MoreVertical size={16} />
+                                </button>
+                                {showMenu && (
+                                    <div className="absolute right-0 mt-2 w-28 bg-white dark:bg-slate-800 rounded-md shadow-lg border dark:border-slate-700 z-10">
+                                        <button onClick={() => { setIsEditing(true); setShowMenu(false); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2">
+                                            <Edit size={14}/> Edit
+                                        </button>
+                                        <button onClick={() => { setIsDeleteModalOpen(true); setShowMenu(false); }} className="w-full text-left px-3 py-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2">
+                                            <Trash2 size={14}/> Delete
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    {isEditing ? (
+                        <div className="mt-2">
+                            <textarea
+                                value={editedContent}
+                                onChange={(e) => setEditedContent(e.target.value)}
+                                className="w-full p-2 text-sm bg-white dark:bg-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                            />
+                            <div className="flex justify-end gap-2 mt-2">
+                                <button onClick={() => setIsEditing(false)} className="py-1 px-3 rounded-md bg-slate-200 dark:bg-slate-500 hover:bg-slate-300 dark:hover:bg-slate-400 font-semibold text-xs">Cancel</button>
+                                <button onClick={handleUpdate} className="py-1 px-3 rounded-md bg-cyan-500 hover:bg-cyan-600 text-white font-semibold text-xs">Save</button>
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">{comment.content}</p>
+                    )}
+                </div>
+            </div>
+        </>
+    );
+}
+
+
+function CommentSection({ postId }) {
+    const { user, userData } = useAuth();
+    const [comments, setComments] = useState([]);
+    const [newComment, setNewComment] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    useEffect(() => {
+        const commentsRef = collection(db, 'community_posts', postId, 'comments');
+        const q = query(commentsRef);
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const fetchedComments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), timestamp: doc.data().timestamp?.toDate() }));
+            fetchedComments.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            setComments(fetchedComments);
+        });
+        return () => unsubscribe();
+    }, [postId]);
+
+    const handleAddComment = async (e) => {
+        e.preventDefault();
+        if (newComment.trim() === '' || !user || !userData) return;
+        setIsSubmitting(true);
+
+        try {
+            const postRef = doc(db, 'community_posts', postId);
+            const commentsRef = collection(db, 'community_posts', postId, 'comments');
+            
+            await addDoc(commentsRef, {
+                content: newComment,
+                authorId: user.uid,
+                authorName: userData.name,
+                authorPic: userData.profile_pic,
+                timestamp: serverTimestamp(),
+            });
+
+            await runTransaction(db, async (transaction) => {
+                const postDoc = await transaction.get(postRef);
+                if (!postDoc.exists()) {
+                    throw "Document does not exist!";
+                }
+                const newCommentCount = (postDoc.data().commentCount || 0) + 1;
+                transaction.update(postRef, { commentCount: newCommentCount });
+            });
+
+            setNewComment('');
+        } catch (error) {
+            console.error("Error adding comment: ", error);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="mt-4 pt-4 border-t dark:border-slate-700">
+            <div className="space-y-4 mb-4">
+                {comments.map(comment => (
+                     <Comment key={comment.id} comment={comment} postId={postId} />
+                ))}
+            </div>
+            <form onSubmit={handleAddComment} className="flex items-center gap-2">
+                <input 
+                    type="text"
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    placeholder="Write a comment..."
+                    className="flex-1 px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    disabled={isSubmitting}
+                />
+                <button type="submit" disabled={isSubmitting || !newComment.trim()} className="p-2 bg-cyan-500 text-white rounded-md disabled:bg-cyan-300 hover:bg-cyan-600">
+                    <Send size={18}/>
+                </button>
+            </form>
+        </div>
+    );
+}
+
+
 // --- Reusable Components ---
 
 function Sidebar({ currentPage, setCurrentPage, toggleTheme, theme, isExpanded, setIsExpanded }) {
@@ -933,6 +1410,8 @@ function Sidebar({ currentPage, setCurrentPage, toggleTheme, theme, isExpanded, 
         { id: 'dashboard', icon: Home, label: 'Dashboard' },
         { id: 'tracker', icon: Feather, label: 'Log Mood' },
         { id: 'journal', icon: BookOpen, label: 'Journal' },
+        { id: 'analytics', icon: BarChartIcon, label: 'Analytics' },
+        { id: 'community', icon: Users, label: 'Community' },
         { id: 'profile', icon: User, label: 'Profile' },
     ];
 
@@ -1049,7 +1528,7 @@ function ChatAssistant() {
     return (
         <>
             <button onClick={() => setIsOpen(!isOpen)} className="fixed bottom-6 right-6 bg-cyan-500 text-white w-16 h-16 rounded-full shadow-lg flex items-center justify-center hover:bg-cyan-600 transition-transform hover:scale-110 z-40">
-                <MessageSquare className="w-8 h-8" />
+                {isOpen ? <span className="text-2xl font-bold">&times;</span> : <MessageSquare className="w-8 h-8" />}
             </button>
             {isOpen && (
                 <div className="fixed bottom-24 right-6 w-full max-w-sm h-[60vh] bg-white dark:bg-slate-800 rounded-2xl shadow-2xl flex flex-col animate-fade-in-up z-50">
@@ -1066,7 +1545,7 @@ function ChatAssistant() {
                                 </div>
                             </div>
                         ))}
-                         {isLoading && <div className="flex justify-start"><div className="max-w-xs px-4 py-2 rounded-2xl bg-slate-200 dark:bg-slate-700 rounded-bl-none"><p className="text-sm text-slate-400">AI is typing...</p></div></div>}
+                         {isLoading && <div className="flex justify-start items-end gap-2"><div className="w-8 h-8 rounded-full bg-cyan-500 flex items-center justify-center text-white flex-shrink-0"><Bot size={20} /></div><div className="max-w-xs px-4 py-2 rounded-2xl bg-slate-200 dark:bg-slate-700 rounded-bl-none"><p className="text-sm text-slate-400 italic">AI is typing...</p></div></div>}
                         <div ref={messagesEndRef} />
                     </div>
                     <div className="p-4 border-t dark:border-slate-700">
