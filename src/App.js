@@ -3,11 +3,12 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail, sendEmailVerification } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, onSnapshot, updateDoc, serverTimestamp, deleteDoc, runTransaction, getDocs } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Bot, Feather, Home, LogOut, MessageSquare, Sun, Moon, User, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb, Shield, ShieldOff, ChevronsLeft, ChevronsRight, AlertTriangle, MailCheck, Users, ThumbsUp, ThumbsDown, MessageCircle, MoreVertical, Edit, Trash2, BarChart as BarChartIcon } from 'lucide-react';
+import { Bot, Feather, Home, LogOut, MessageSquare, Sun, Moon, User, Award, Sparkles, Send, Smile, Meh, Frown, Angry, Laugh, BookOpen, Lightbulb, Shield, ShieldOff, ChevronsLeft, ChevronsRight, AlertTriangle, MailCheck, Users, ThumbsUp, ThumbsDown, MessageCircle, MoreVertical, Edit, Trash2, BarChart as BarChartIcon, BrainCircuit, Leaf, HeartHandshake, Headphones, Gamepad2, Wind } from 'lucide-react';
 
 // --- Firebase Configuration & Initialization ---
-// This configuration now works for both local development and the preview environment.
-// For local, it uses environment variables from a .env file.
+// IMPORTANT: The provided API keys are placeholders and will not work.
+// In a real application, these should be replaced with your actual Firebase project configuration
+// and secured properly (e.g., using environment variables).
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
   authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN,
@@ -153,7 +154,7 @@ const AuthProvider = ({ children }) => {
 
     const value = { user, userData, loading };
 
-    return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
+    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 // --- Main App Component ---
@@ -168,6 +169,7 @@ export default function App() {
 function MainApp() {
     const { user, loading } = useAuth();
     const [currentPage, setCurrentPage] = useState('dashboard');
+    const [publicPage, setPublicPage] = useState('home'); // 'home', 'auth', 'games', 'yoga', 'music'
     const [theme, setTheme] = useState('light');
     const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
@@ -204,7 +206,22 @@ function MainApp() {
     }
     
     if (!user || (!user.emailVerified && !user.providerData.some(p => p.providerId === 'google.com'))) {
-        return <AuthScreen />;
+        switch (publicPage) {
+            case 'auth':
+                return <AuthScreen onNavigateToHome={() => setPublicPage('home')} />;
+            case 'games':
+                return <StressGamesScreen onNavigateToHome={() => setPublicPage('home')} />;
+            case 'yoga':
+                return <YogaTechniquesScreen onNavigateToHome={() => setPublicPage('home')} />;
+            case 'music':
+                return <RelaxingMusicScreen onNavigateToHome={() => setPublicPage('home')} />;
+            case 'home':
+            default:
+                return <PublicHomePage 
+                    onNavigateToAuth={() => setPublicPage('auth')} 
+                    onNavigateToPage={(page) => setPublicPage(page)}
+                />;
+        }
     }
     
     const renderPage = () => {
@@ -215,6 +232,9 @@ function MainApp() {
             case 'analytics': return <AnalyticsScreen />;
             case 'community': return <CommunityScreen />;
             case 'profile': return <ProfileScreen />;
+            case 'games': return <StressGamesScreen onNavigateToHome={() => setCurrentPage('dashboard')} backButtonLabel="Dashboard" />;
+            case 'yoga': return <YogaTechniquesScreen onNavigateToHome={() => setCurrentPage('dashboard')} backButtonLabel="Dashboard" />;
+            case 'music': return <RelaxingMusicScreen onNavigateToHome={() => setCurrentPage('dashboard')} backButtonLabel="Dashboard" />;
             default: return <DashboardScreen onNavigate={setCurrentPage} />;
         }
     };
@@ -239,7 +259,7 @@ function MainApp() {
 
 // --- Screens ---
 
-function AuthScreen() {
+function AuthScreen({ onNavigateToHome }) {
   const [authMode, setAuthMode] = useState('login'); 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -351,6 +371,9 @@ function AuthScreen() {
 
   return (
       <div className="flex flex-col items-center justify-center w-full min-h-screen bg-gradient-to-br from-cyan-50 to-blue-100 dark:from-slate-800 dark:to-slate-900">
+          <button onClick={onNavigateToHome} className="absolute top-4 left-4 text-slate-600 dark:text-slate-300 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors">
+              &larr; Back to Home
+          </button>
           <div className="w-full max-w-md p-8 space-y-4 bg-white dark:bg-slate-800 rounded-2xl shadow-lg">
               <div className="text-center">
                   <Logo className="w-16 h-16 mx-auto mb-2" />
@@ -410,6 +433,216 @@ function AuthScreen() {
   );
 }
 
+function PublicHomePage({ onNavigateToAuth, onNavigateToPage }) {
+    const features = [
+        { icon: <Feather className="w-8 h-8 text-cyan-500"/>, title: "Mood Tracking", description: "Log your daily mood and stress levels to understand your emotional patterns." },
+        { icon: <BookOpen className="w-8 h-8 text-cyan-500"/>, title: "Private Journal", "description": "A secure, PIN-protected space for your thoughts, enhanced with AI reflections." },
+        { icon: <Users className="w-8 h-8 text-cyan-500"/>, title: "Supportive Community", description: "Connect with others, share experiences, and find encouragement in our anonymous blog." },
+    ];
+    
+    const techniques = [
+        { page: 'games', icon: <Gamepad2 className="w-10 h-10 text-cyan-500"/>, title: "Mindful Games", description: "Engage in simple games designed to calm the mind and improve focus." },
+        { page: 'yoga', icon: <Leaf className="w-10 h-10 text-cyan-500"/>, title: "Gentle Yoga", description: "Explore beginner-friendly yoga poses to release tension and connect with your body." },
+        { page: 'music', icon: <Headphones className="w-10 h-10 text-cyan-500"/>, title: "Soothing Sounds", description: "Listen to a curated collection of music and sounds to promote relaxation and peace." },
+    ];
+
+    return (
+        <div className="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans">
+            {/* Header */}
+            <header className="fixed top-0 left-0 right-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-50 shadow-sm">
+                <div className="container mx-auto px-6 py-4 flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                        <Logo className="w-8 h-8" />
+                        <span className="font-bold text-xl">EaseHaven</span>
+                    </div>
+                    <button onClick={onNavigateToAuth} className="bg-cyan-500 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-cyan-600 transition-colors">
+                        Sign In / Sign Up
+                    </button>
+                </div>
+            </header>
+
+            {/* Hero Section */}
+            <section className="pt-32 pb-20 bg-gradient-to-b from-cyan-50 to-white dark:from-cyan-900/20 dark:to-slate-900">
+                <div className="container mx-auto px-6 text-center">
+                    <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 dark:text-white leading-tight">
+                        Find Your Calm, <span className="text-cyan-500">One Breath at a Time.</span>
+                    </h1>
+                    <p className="mt-6 text-lg text-slate-600 dark:text-slate-300 max-w-2xl mx-auto">
+                        EaseHaven is your personal companion for mental wellness. Track your mood, reflect in a private journal, and connect with a supportive community.
+                    </p>
+                    <button onClick={onNavigateToAuth} className="mt-10 bg-cyan-500 text-white font-bold py-4 px-8 rounded-full shadow-lg hover:bg-cyan-600 transition-transform hover:scale-105 transform">
+                        Start Your Journey for Free
+                    </button>
+                </div>
+            </section>
+
+            {/* About Section */}
+            <section id="about" className="py-20">
+                <div className="container mx-auto px-6 flex flex-col md:flex-row items-center gap-12">
+                    <div className="md:w-1/2">
+                        <img src="https://placehold.co/600x400/E0F2F7/334155?text=Our+Mission" alt="Team collaborating" className="rounded-xl shadow-lg w-full"/>
+                    </div>
+                    <div className="md:w-1/2">
+                        <h2 className="text-3xl font-bold mb-4">Our Aim and Origin</h2>
+                        <p className="text-slate-600 dark:text-slate-400 mb-4">
+                            EaseHaven was born from a simple idea: mental wellness tools should be accessible, private, and stigma-free. We aim to provide a safe and supportive digital environment where you can understand your feelings and actively work towards a more balanced life.
+                        </p>
+                        <p className="text-slate-600 dark:text-slate-400">
+                            Our journey began with a small team passionate about mental health advocacy, building an app that serves as a gentle guide and a reliable friend.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            {/* Features Section */}
+            <section id="features" className="py-20 bg-slate-100 dark:bg-slate-800">
+                <div className="container mx-auto px-6 text-center">
+                    <h2 className="text-3xl font-bold mb-2">A Toolkit for Your Mind</h2>
+                    <p className="text-slate-600 dark:text-slate-400 mb-12 max-w-xl mx-auto">Everything you need to build a healthier relationship with your thoughts and emotions.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        {features.map(feature => (
+                            <div key={feature.title} className="bg-white dark:bg-slate-900 p-8 rounded-xl shadow-md text-center">
+                                <div className="inline-block p-4 bg-cyan-100 dark:bg-cyan-900/50 rounded-full mb-4">
+                                    {feature.icon}
+                                </div>
+                                <h3 className="text-xl font-bold mb-2">{feature.title}</h3>
+                                <p className="text-slate-600 dark:text-slate-400">{feature.description}</p>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+
+            {/* Techniques Section */}
+            <section id="techniques" className="py-20">
+                <div className="container mx-auto px-6 text-center">
+                    <h2 className="text-3xl font-bold mb-2">Discover Relaxation Techniques</h2>
+                    <p className="text-slate-600 dark:text-slate-400 mb-12 max-w-xl mx-auto">Explore tools and activities designed to bring a sense of calm and well-being to your day.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                        {techniques.map(tech => (
+                            <div key={tech.title} className="bg-white dark:bg-slate-800 p-8 rounded-xl shadow-lg text-center flex flex-col items-center hover:shadow-cyan-500/20 transition-shadow duration-300">
+                                <div className="inline-block p-5 bg-cyan-100 dark:bg-cyan-900/50 rounded-full mb-5">
+                                    {tech.icon}
+                                </div>
+                                <h3 className="text-xl font-bold mb-3">{tech.title}</h3>
+                                <p className="text-slate-600 dark:text-slate-400 flex-grow">{tech.description}</p>
+                                <button onClick={() => onNavigateToPage(tech.page)} className="mt-6 bg-cyan-500 text-white font-semibold py-2 px-6 rounded-lg shadow-md hover:bg-cyan-600 transition-colors">
+                                    Explore
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+            
+            {/* Quotes Section */}
+            <section className="py-20 bg-cyan-500 text-white">
+                <div className="container mx-auto px-6 text-center">
+                    <blockquote className="text-2xl md:text-3xl italic font-serif max-w-3xl mx-auto">
+                        "The greatest weapon against stress is our ability to choose one thought over another."
+                    </blockquote>
+                    <cite className="mt-4 block font-semibold not-italic">- William James</cite>
+                </div>
+            </section>
+
+            {/* Footer */}
+            <footer className="bg-slate-100 dark:bg-slate-800 py-8">
+                <div className="container mx-auto px-6 text-center text-slate-500 dark:text-slate-400">
+                    <p>&copy; {new Date().getFullYear()} EaseHaven. All Rights Reserved.</p>
+                    <p className="text-sm mt-2">A sanctuary for your mind.</p>
+                </div>
+            </footer>
+        </div>
+    );
+}
+
+// --- New Public Screens ---
+
+function StressGamesScreen({ onNavigateToHome, backButtonLabel = "Home" }) {
+    const games = [
+        { title: "Breathing Exercise", description: "Follow the animated guide to practice deep, calming breaths.", icon: <Wind/> },
+        { title: "Zen Garden", description: "Create a peaceful digital zen garden to focus your mind.", icon: <Leaf/> },
+        { title: "Pattern Matching", description: "A simple, meditative game of matching calm patterns.", icon: <BrainCircuit/> },
+    ];
+    return (
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 p-8">
+            <button onClick={onNavigateToHome} className="mb-8 text-slate-600 dark:text-slate-300 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors">
+                &larr; Back to {backButtonLabel}
+            </button>
+            <div className="max-w-4xl mx-auto text-center">
+                <h1 className="text-4xl font-bold mb-4">Stress-Reducing Games</h1>
+                <p className="text-lg text-slate-500 dark:text-slate-400 mb-12">Engage your mind with these simple activities designed to promote relaxation.</p>
+                <div className="grid md:grid-cols-3 gap-8">
+                    {games.map(game => (
+                        <div key={game.title} className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                            <div className="text-cyan-500 w-12 h-12 mx-auto mb-4 flex items-center justify-center">{game.icon}</div>
+                            <h3 className="font-bold text-xl mb-2">{game.title}</h3>
+                            <p className="text-slate-500 dark:text-slate-400 text-sm">{game.description}</p>
+                        </div>
+                    ))}
+                </div>
+                <p className="mt-12 text-sm text-slate-400">Note: These are conceptual placeholders. Full games would be implemented here.</p>
+            </div>
+        </div>
+    );
+}
+
+function YogaTechniquesScreen({ onNavigateToHome, backButtonLabel = "Home" }) {
+    const poses = [
+        { title: "Child's Pose (Balasana)", description: "A gentle resting pose that stretches the back, hips, and thighs while calming the mind." },
+        { title: "Cat-Cow Pose (Marjaryasana-Bitilasana)", description: "A dynamic flow that warms the spine and relieves tension in the back and neck." },
+        { title: "Corpse Pose (Savasana)", description: "The ultimate relaxation pose. It allows the body to rest and absorb the benefits of the practice." },
+    ];
+     return (
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 p-8">
+            <button onClick={onNavigateToHome} className="mb-8 text-slate-600 dark:text-slate-300 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors">
+                &larr; Back to {backButtonLabel}
+            </button>
+            <div className="max-w-4xl mx-auto text-center">
+                <h1 className="text-4xl font-bold mb-4">Yoga for Relaxation</h1>
+                <p className="text-lg text-slate-500 dark:text-slate-400 mb-12">Practice these simple yoga poses to release physical tension and find mental clarity.</p>
+                <div className="space-y-8 text-left">
+                    {poses.map(pose => (
+                        <div key={pose.title} className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                            <h3 className="font-bold text-xl mb-2 text-cyan-600 dark:text-cyan-400">{pose.title}</h3>
+                            <p className="text-slate-600 dark:text-slate-300">{pose.description}</p>
+                        </div>
+                    ))}
+                </div>
+                 <p className="mt-12 text-sm text-slate-400">Disclaimer: Consult with a healthcare professional before beginning any new exercise regimen.</p>
+            </div>
+        </div>
+    );
+}
+
+function RelaxingMusicScreen({ onNavigateToHome, backButtonLabel = "Home" }) {
+    const musicTypes = [
+        { title: "Ambient Music", description: "Flowing, atmospheric soundscapes that create a calm environment for focus or relaxation." },
+        { title: "Nature Sounds", description: "Immerse yourself in the sounds of rain, forests, or oceans to connect with nature and de-stress." },
+        { title: "Binaural Beats", description: "Specific audio frequencies designed to influence brainwaves and promote a state of calm or focus." },
+    ];
+    return (
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 p-8">
+            <button onClick={onNavigateToHome} className="mb-8 text-slate-600 dark:text-slate-300 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors">
+                &larr; Back to {backButtonLabel}
+            </button>
+            <div className="max-w-4xl mx-auto text-center">
+                <h1 className="text-4xl font-bold mb-4">Soothing Music & Sounds</h1>
+                <p className="text-lg text-slate-500 dark:text-slate-400 mb-12">Use the power of sound to calm your nervous system and find your center.</p>
+                 <div className="grid md:grid-cols-3 gap-8">
+                    {musicTypes.map(music => (
+                        <div key={music.title} className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md">
+                            <h3 className="font-bold text-xl mb-2">{music.title}</h3>
+                            <p className="text-slate-500 dark:text-slate-400 text-sm">{music.description}</p>
+                        </div>
+                    ))}
+                </div>
+                <p className="mt-12 text-sm text-slate-400">Note: This page would typically feature embedded audio players.</p>
+            </div>
+        </div>
+    );
+}
+
 async function callGeminiAPI(prompt, isJson = false) {
     // In the preview environment, the API key is handled automatically.
     const apiKey = ""; 
@@ -450,6 +683,12 @@ function DashboardScreen({ onNavigate }) {
     const [thoughtOfTheDay, setThoughtOfTheDay] = useState('');
     const [thoughtLoading, setThoughtLoading] = useState(true);
     const [verificationMessage, setVerificationMessage] = useState('');
+
+    const activities = [
+        { page: 'games', icon: <Gamepad2 className="w-10 h-10 text-cyan-500"/>, title: "Mindful Games", description: "Engage in simple games designed to calm the mind." },
+        { page: 'yoga', icon: <Leaf className="w-10 h-10 text-cyan-500"/>, title: "Gentle Yoga", description: "Explore poses to release tension and connect with your body." },
+        { page: 'music', icon: <Headphones className="w-10 h-10 text-cyan-500"/>, title: "Soothing Sounds", description: "Listen to curated sounds to promote relaxation." },
+    ];
 
     useEffect(() => {
         const getThoughtOfTheDay = async () => {
@@ -536,6 +775,27 @@ function DashboardScreen({ onNavigate }) {
                         <p className="text-3xl font-bold text-cyan-500">{streaks.longest_streak || 0} days</p>
                     </div>
                     <Sparkles className="w-10 h-10 text-pink-400" />
+                </div>
+            </div>
+
+            <div className="mt-6">
+                <h2 className="text-2xl font-bold mb-4">Relaxation Activities</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {activities.map(activity => (
+                        <button 
+                            key={activity.page} 
+                            onClick={() => onNavigate(activity.page)}
+                            className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-md text-left hover:shadow-lg hover:-translate-y-1 transition-all duration-300 flex flex-col"
+                        >
+                            <div className="flex items-center gap-4 mb-3">
+                                <div className="inline-block p-3 bg-cyan-100 dark:bg-cyan-900/50 rounded-full">
+                                    {React.cloneElement(activity.icon, { className: "w-8 h-8 text-cyan-500" })}
+                                </div>
+                                <h3 className="text-xl font-bold">{activity.title}</h3>
+                            </div>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm flex-grow">{activity.description}</p>
+                        </button>
+                    ))}
                 </div>
             </div>
         </div>
