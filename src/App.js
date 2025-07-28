@@ -18,7 +18,6 @@ const firebaseConfig = {
   appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
 
-
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -644,12 +643,14 @@ function RelaxingMusicScreen({ onNavigateToHome, backButtonLabel = "Home" }) {
 }
 
 async function callGeminiAPI(prompt, isJson = false) {
-    // In the preview environment, the API key is handled automatically.
-    const apiKey = ""; 
+    // Use the API key from environment variables for localhost,
+    // otherwise, the preview environment will handle it.
+    const apiKey = process.env.REACT_APP_GEMINI_API_KEY || ""; 
 
     const model = "gemini-2.0-flash";
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     
+    // ... the rest of the function remains the same
     const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
     if (isJson) {
         payload.generationConfig = { responseMimeType: "application/json" };
@@ -659,12 +660,17 @@ async function callGeminiAPI(prompt, isJson = false) {
         const response = await fetch(apiUrl, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
         });
-        if (!response.ok) throw new Error(`API call failed with status: ${response.status}`);
+        if (!response.ok) {
+            // Provide a more helpful error for API key issues
+            if (response.status === 400) {
+                 throw new Error("API call failed: Bad request. Please check if your API key is valid and enabled.");
+            }
+            throw new Error(`API call failed with status: ${response.status}`);
+        }
         const result = await response.json();
         
         if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
             const text = result.candidates[0].content.parts[0].text;
-            // Clean up potential markdown formatting from the response
             const cleanedText = text.replace(/```json|```/g, '').trim();
             return isJson ? JSON.parse(cleanedText) : cleanedText;
         } else {
