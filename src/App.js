@@ -18,6 +18,7 @@ const firebaseConfig = {
   appId: process.env.REACT_APP_FIREBASE_APP_ID
 };
 
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -645,7 +646,7 @@ function RelaxingMusicScreen({ onNavigateToHome, backButtonLabel = "Home" }) {
 async function callGeminiAPI(prompt, isJson = false) {
     // Use the API key from environment variables for localhost,
     // otherwise, the preview environment will handle it.
-    const apiKey = process.env.REACT_APP_GEMINI_API_KEY || ""; 
+    const apiKey = process.env.REACT_APP_GEMINI_API_KEY; 
 
     const model = "gemini-2.0-flash";
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
